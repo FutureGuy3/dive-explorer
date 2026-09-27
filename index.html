@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DIVE EXPLORER</title>
+<link rel="shortcut icon" href="favicon.ico">
+<link rel="icon" href="icon-192.png">
+<link rel="icon" sizes="512x512" href="icon-512.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0b0f0e">
+<style>
+  /* 配色・トークンはDIVE ANALYZER(DA)のものをそのまま踏襲する。 */
+  :root{
+    --bg:#0b0f0e;
+    --panel:#121816;
+    --panel2:#1a2220;
+    --line:#26332f;
+    --accent:#ffd23f;
+    --accent2:#3ddc97;
+    --danger:#ff5a5a;
+    --text:#eef2f0;
+    --sub:#8fa39c;
+    --mono: 'SF Mono','Consolas',monospace;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{
+    margin:0;padding:0;width:100%;height:100%;
+    background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+    overscroll-behavior:none;
+  }
+  #app{min-height:100%;display:flex;flex-direction:column;}
+
+  /* ---------- Top bar ---------- */
+  #topbar{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:10px 14px;background:var(--panel);border-bottom:1px solid var(--line);
+    flex:0 0 auto;position:sticky;top:0;z-index:20;
+  }
+  #topbar h1{font-size:16px;margin:0;color:var(--accent2);letter-spacing:0.04em;line-height:1.3;white-space:nowrap;}
+  #topbar h1 .byline{font-size:11px;color:var(--sub);letter-spacing:0.02em;font-weight:400;margin-left:4px;}
+  #topbar .sub{font-size:11px;color:var(--sub);}
+  #backupBar{
+    display:flex;gap:6px;padding:8px 14px;background:var(--panel);
+    border-bottom:1px solid var(--line);flex:0 0 auto;
+  }
+
+  .btn{
+    background:var(--panel2);color:var(--text);border:1px solid var(--line);
+    border-radius:9px;padding:8px 12px;font-size:13px;white-space:nowrap;cursor:pointer;
+  }
+  .btn.primary{background:var(--accent2);color:#04211a;border-color:var(--accent2);font-weight:700;}
+  .btn.warn{background:var(--danger);color:#2a0505;border-color:var(--danger);font-weight:700;}
+  .btn.small{padding:5px 9px;font-size:11px;}
+  .btn:disabled{opacity:.35;cursor:default;}
+  input[type=text],textarea{
+    background:var(--panel2);color:var(--text);border:1px solid var(--line);
+    border-radius:7px;padding:6px 8px;font-size:12.5px;font-family:inherit;
+  }
+
+  /* ---------- Tabs ---------- */
+  #tabsBar{
+    display:flex;gap:6px;padding:8px 14px;background:var(--panel);
+    border-bottom:1px solid var(--line);overflow-x:auto;flex:0 0 auto;
+    position:sticky;top:53px;z-index:19;
+  }
+  #tabsBar button{
+    background:var(--panel2);color:var(--sub);border:1px solid var(--line);
+    border-radius:20px;padding:6px 14px;font-size:12.5px;white-space:nowrap;cursor:pointer;
+  }
+  #tabsBar button.active{background:var(--accent2);color:#04211a;font-weight:700;border-color:var(--accent2);}
+
+  /* ---------- Empty state ---------- */
+  #emptyState{
+    flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:10px;padding:40px 20px;text-align:center;color:var(--sub);font-size:13px;
+  }
+
+  /* ---------- Table area ---------- */
+  #tableWrap{flex:1;overflow:auto;padding:0 0 24px;}
+  table#compareTable{border-collapse:collapse;font-size:11.5px;font-family:var(--mono);}
+  table#compareTable th,table#compareTable td{
+    border-bottom:1px solid var(--line);border-right:1px solid var(--line);
+    padding:5px 6px;text-align:left;vertical-align:top;white-space:nowrap;
+  }
+  table#compareTable th:first-child,table#compareTable td:first-child{
+    position:sticky;left:0;background:var(--bg);z-index:5;
+    color:var(--sub);font-family:inherit;white-space:normal;min-width:92px;max-width:118px;font-size:11px;
+  }
+  table#compareTable thead th{
+    position:sticky;top:0;background:var(--panel);z-index:8;vertical-align:top;
+  }
+  table#compareTable thead th:first-child{z-index:12;background:var(--panel);}
+  table#compareTable td{color:var(--text);min-width:70px;}
+  /* v5: 折り返し不可(nowrap)のままだと、他の行の長い値(例:「32.7°(迎角 9.5°)」)に
+     引っ張られて列全体が広がってしまい、min-widthを縮めても見た目に反映されなかった。
+     値セル(tbody側)は折り返しを許可し、列の幅は基本的にmin-widthに従うようにする。
+     見出し(thead)側は元々内部の要素(ファイル名の省略表示等)で幅を制御しているので対象外。 */
+  table#compareTable tbody td{white-space:normal;}
+  table#compareTable tr.sectionRow td{background:rgba(61,220,151,0.06);color:var(--accent2);font-weight:700;white-space:normal;}
+  table#compareTable tr.sectionRow td:first-child{background:rgba(61,220,151,0.06);}
+  .colHead{display:flex;flex-direction:column;gap:3px;min-width:70px;max-width:70px;}
+  .colHead .fname{
+    font-size:10px;color:var(--sub);font-family:inherit;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70px;
+  }
+  .colHead .impDate{font-size:9.5px;color:var(--sub);}
+  .colHead .swimmerRow{display:flex;gap:3px;align-items:center;}
+  .colHead .swimmerRow span{font-size:10px;color:var(--sub);flex:0 0 auto;}
+  .colHead input[type=text]{width:38px;font-size:10.5px;padding:4px 5px;}
+  .colHead .btnRow{display:flex;gap:3px;flex-wrap:wrap;}
+  .colHead .btnRow .btn.small{padding:3px 5px;font-size:9.5px;}
+  .thumbImg{max-width:105px;border-radius:5px;display:block;}
+  textarea.memoBox{width:70px;height:44px;font-size:10.5px;resize:vertical;}
+
+  #importBox,#backupImportBox{display:none;}
+
+  /* ---------- 指標説明(DAのMETRIC_INFOと同内容)のアイコン・モーダル ---------- */
+  .infoIcon{cursor:pointer;color:var(--accent2);font-size:11px;margin-left:2px;}
+  #metricInfoOverlay{
+    display:none;position:fixed;inset:0;z-index:100;background:rgba(0,0,0,0.6);
+    align-items:center;justify-content:center;padding:16px;
+  }
+  #metricInfoOverlay.active{display:flex;}
+  #metricInfoCard{
+    background:var(--panel2);border:1px solid var(--line);border-radius:14px;
+    max-width:380px;width:100%;max-height:80vh;overflow-y:auto;
+    padding:16px 18px;text-align:left;font-family:inherit;
+  }
+  #metricInfoHeader{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:10px;}
+  #metricInfoTitle{font-size:16px;color:var(--accent2);margin:0;}
+  #metricInfoCloseBtn{background:none;border:none;color:var(--sub);font-size:20px;padding:2px 6px;line-height:1;cursor:pointer;}
+  #metricInfoBody{font-size:13px;color:var(--text);line-height:1.7;font-family:inherit;}
+  #metricInfoBody p{margin:0 0 10px;}
+  #metricInfoBody p:last-child{margin-bottom:0;}
+  #metricInfoBody table{width:100%;font-family:var(--mono);font-size:12px;border-collapse:collapse;margin-top:2px;}
+  #metricInfoBody td{padding:3px 2px;border-bottom:1px solid var(--line);}
+  #metricInfoBody .note{font-size:11px;color:var(--sub);}
+
+  /* v7: DA側の色分け表示(あくまで目安のガイドライン)をDEの比較表にも反映する。 */
+  .metricGood{color:var(--accent2);font-weight:700;}
+  .metricBad{color:var(--danger);font-weight:700;}
+</style>
+</head>
+<body>
+<div id="app">
+  <input type="file" id="importBox" accept=".html" multiple>
+  <input type="file" id="backupImportBox" accept=".json">
+
+  <div id="topbar">
+    <div>
+      <h1>DIVE EXPLORER <span class="byline">by HWTECH</span></h1>
+      <div class="sub">DIVE ANALYZERの書き出しhtml(DA/DAb)を複数読み込んで比較</div>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center;">
+      <button class="btn small" id="backupToggleBtn">▼</button>
+      <button class="btn primary" id="importBtn">DAのhtml読み込み</button>
+    </div>
+  </div>
+  <div id="backupBar" style="display:none;">
+    <button class="btn small" id="backupExportBtn">全データを書き出す</button>
+    <button class="btn small" id="backupImportBtn">書き出したデータを読み込む</button>
+    <button class="btn small warn" id="deleteAllBtn">全データを削除</button>
+  </div>
+
+  <div id="tabsBar"></div>
+
+  <div id="emptyState" style="display:none;">
+    <div>まだセッションが読み込まれていません。</div>
+    <div>DIVE ANALYZERで書き出したhtml(DA_..._....html / DAb_..._....html)を、上の「DAのhtml読み込み」から選んでください(複数選択可)。</div>
+  </div>
+
+  <div id="tableWrap"></div>
+</div>
+
+<script>
+/* ============================================================
+   DIVE EXPLORER v13
+   ------------------------------------------------------------
+   DIVE ANALYZER(DA)が書き出すhtml内の<script type="application/json"
+   id="da-export-data">を読み込み、IndexedDBに蓄積して複数セッションを
+   横並びで比較するための単体htmlアプリ。DA同様、ビルド不要の単一ファイル。
+
+   データモデル(1セッション = 1回の書き出しhtml):
+   {
+     id, importedAt, sourceFileName, order,
+     memo,                  // DIVE EXPLORER側の自由記述メモ(DA側のメモとは別)
+     detectedSwimmer,       // 泳者メモの先頭の"@"より前の部分から自動検出(不変)
+     primarySwimmer,        // 実際に割り当てられている泳者名(手動で変更可。既定値=detectedSwimmer)
+     referencedSwimmers,    // 参照として追加表示している他の泳者名の配列
+     daPayload              // DA側のJSON全体(result, blockResult, resultCopyLines, 画像など)
+   }
+============================================================ */
+
+const DB_NAME = 'DiveExplorerDB';
+const DB_VERSION = 1;
+const STORE = 'sessions';
+const ALL_TAB = '__all__';
+const UNCLASSIFIED_TAB = '__unclassified__';
+
+var sessions = [];       // メモリ上のキャッシュ(DBと同期)
+var currentTab = ALL_TAB;
+
+/* ---------- IndexedDB helpers ---------- */
+function openDB(){
+  return new Promise((resolve, reject)=>{
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = ()=>{
+      const db = req.result;
+      if(!db.objectStoreNames.contains(STORE)){
+        db.createObjectStore(STORE, {keyPath:'id'});
+      }
+    };
+    req.onsuccess = ()=>resolve(req.result);
+    req.onerror = ()=>reject(req.error);
+  });
+}
+async function dbGetAll(){
+  const db = await openDB();
+  return new Promise((resolve, reject)=>{
+    const tx = db.transaction(STORE, 'readonly');
+    const req = tx.objectStore(STORE).getAll();
+    req.onsuccess = ()=>resolve(req.result);
+    req.onerror = ()=>reject(req.error);
+  });
+}
+async function dbPut(session){
+  const db = await openDB();
+  return new Promise((resolve, reject)=>{
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).put(session);
+    tx.oncomplete = ()=>resolve();
+    tx.onerror = ()=>reject(tx.error);
+  });
+}
+async function dbDelete(id){
+  const db = await openDB();
+  return new Promise((resolve, reject)=>{
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).delete(id);
+    tx.oncomplete = ()=>resolve();
+    tx.onerror = ()=>reject(tx.error);
+  });
+}
+async function reloadSessions(){
+  sessions = await dbGetAll();
+}
+
+function uid(){
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+/* ---------- 泳者名の自動検出 ---------- */
+// 泳者メモの中に"@"があれば、最初の"@"より前の部分を泳者名とする。
+// "@"がなければ未分類(null)として扱う。
+function detectSwimmerFromMemo(memo){
+  if(!memo) return null;
+  const idx = memo.indexOf('@');
+  if(idx < 0) return null;
+  const name = memo.slice(0, idx).trim();
+  return name || null;
+}
+
+/* ---------- DA書き出しhtmlの読み込み ---------- */
+async function handleFiles(fileList){
+  const files = Array.from(fileList);
+  if(files.length===0) return;
+  let maxOrder = sessions.reduce((m,s)=>Math.max(m, s.order||0), 0);
+  const errors = [];
+  for(const file of files){
+    try{
+      const text = await file.text();
+      const match = text.match(/<script type="application\/json" id="da-export-data">([\s\S]*?)<\/script>/);
+      if(!match){ errors.push(file.name+': DIVE ANALYZERの書き出しhtmlとして認識できませんでした'); continue; }
+      let payload;
+      try{ payload = JSON.parse(match[1]); }
+      catch(e){ errors.push(file.name+': データの解析に失敗しました'); continue; }
+      if(!payload.resultCopyLines){
+        errors.push(file.name+': このファイルは古い形式のDIVE ANALYZERで書き出されたため読み込めません(resultCopyLines未対応)');
+        continue;
+      }
+      maxOrder += 1;
+      const memo = (payload.state && payload.state.swimmerMemo) || '';
+      const detected = detectSwimmerFromMemo(memo);
+      const session = {
+        id: uid(),
+        importedAt: new Date().toISOString(),
+        sourceFileName: file.name,
+        order: maxOrder,
+        memo: '',
+        detectedSwimmer: detected,
+        primarySwimmer: detected,
+        referencedSwimmers: [],
+        daPayload: payload
+      };
+      await dbPut(session);
+    }catch(e){
+      errors.push(file.name+': 読み込み中にエラーが発生しました('+e.message+')');
+    }
+  }
+  await reloadSessions();
+  render();
+  if(errors.length){
+    alert('一部のファイルを読み込めませんでした:\n\n'+errors.join('\n'));
+  }
+}
+
+// v3: DA側で「タップ/ホバーで説明が出る」項目(METRIC_INFO)と同じ説明を、DEの指標名の
+// 隣にも表示する。DA側の内部キー(METRIC_INFOのオブジェクトキー)と、resultCopyLinesの
+// ラベル文字列は完全には一致しない(例:キー"Vh"のtitleは"水平速度"だが、行のラベルは
+// "離台時の水平速度")。DA側で表示している行のラベルをそのまま対応表にしている。
+// DA側で項目名や対応するキーを変更した場合は、ここも合わせて更新する必要がある。
+// v14: DA v119で新規追加された「重心入水時合成速度」(comEntrySpeed)の説明文が
+// DEに表示されない不具合を修正。この対応表はDA側のMETRIC_INFOキー追加を自動追随
+// しないため、DA側で項目を追加するたびに手動でここに追記する必要がある。
+const LABEL_TO_METRIC_KEY = {
+  '離台時の水平速度': 'Vh',
+  '離台時の飛び出し角度': 'launchAngle',
+  '離台時の重心の高さ': 'h0',
+  '滞空時間(離台〜重心着水)': 'flightTime',
+  '指先着水時の重心ベクトル角': 'fingerVectorAngle',
+  '指先着水時の姿勢角(指先-重心)': 'fingerEntryAngle',
+  '重心入水角度': 'entryAngle',
+  '重心入水時合成速度': 'comEntrySpeed',
+  '入水孔直径(指先-つま先)': 'entryHoleDiameter',
+  '台先端〜重心着水の飛距離': 'totalDist',
+  '重心の前後': 'comRatio',
+  '後ろ脚膝角度(始動前)': 'backKneeAngleSet'
+};
+// v8: セッションのappVersion(例:'v109')から数値部分を取り出す。存在しない/解析できない
+// 場合は0を返し、優先度を最低にする(古い形式のファイル等への安全側フォールバック)。
+function parseAppVersion(v){
+  if(!v) return 0;
+  const m = /^v?(\d+)/.exec(String(v));
+  return m ? parseInt(m[1], 10) : 0;
+}
+// 表示中のセッション群の中から、そのラベルに対応するmetricInfoを持つセッションのうち、
+// appVersionが最も新しいものの説明を使う(以前は「先頭優先」だったが、新旧のファイルが
+// 混在していると意図せず古い説明文が表示されてしまう不具合があったため変更した)。
+function findMetricInfoForLabel(list, label){
+  const key = LABEL_TO_METRIC_KEY[label];
+  if(!key) return null;
+  let best = null, bestVersion = -1;
+  for(const s of list){
+    const info = s.daPayload && s.daPayload.metricInfo && s.daPayload.metricInfo[key];
+    if(!info) continue;
+    const ver = parseAppVersion(s.daPayload && s.daPayload.appVersion);
+    if(ver > bestVersion){ bestVersion = ver; best = info; }
+  }
+  return best;
+}
+// v12: 「位置(並び順)によって特定の指標が表示されたりされなかったりする」という
+// 不具合の原因切り分け用の診断機能。そのセッションのIndexedDB上の生データ
+// (resultCopyLines、order、id等)をそのままテキスト表示する。表示ロジックを一切
+// 介さないので、「データとして本当に保存されているか」を直接確認できる。
+function showRawPayload(sessionId){
+  const s = sessions.find(x=>x.id===sessionId);
+  if(!s){ alert('セッションが見つかりません。'); return; }
+  const lines = (s.daPayload && s.daPayload.resultCopyLines) || [];
+  const hasHole = lines.some(l=>l.indexOf('入水孔直径')>=0);
+  const body = '<p style="font-size:12px;color:var(--sub);">id: '+escapeHtml(s.id)+' / order: '+s.order
+    + ' / appVersion: '+escapeHtml((s.daPayload&&s.daPayload.appVersion)||'(不明)')
+    + '<br>入水孔直径の行を含むか: <b style="color:'+(hasHole?'var(--accent2)':'var(--danger)')+'">'+(hasHole?'はい':'いいえ')+'</b></p>'
+    + '<pre style="white-space:pre-wrap;font-size:11px;line-height:1.6;">'+escapeHtml(lines.join('\n'))+'</pre>';
+  showMetricInfoModal('生データ: '+s.sourceFileName, body);
+}
+function showMetricInfoModal(title, bodyHtml){
+  let overlay = document.getElementById('metricInfoOverlay');
+  if(!overlay){
+    overlay = document.createElement('div');
+    overlay.id = 'metricInfoOverlay';
+    overlay.innerHTML = '<div id="metricInfoCard"><div id="metricInfoHeader">'
+      + '<h3 id="metricInfoTitle"></h3><button id="metricInfoCloseBtn" onclick="closeMetricInfoModal()">✕</button>'
+      + '</div><div id="metricInfoBody"></div></div>';
+    overlay.onclick = (e)=>{ if(e.target===overlay) closeMetricInfoModal(); };
+    document.body.appendChild(overlay);
+  }
+  document.getElementById('metricInfoTitle').textContent = title;
+  document.getElementById('metricInfoBody').innerHTML = bodyHtml;
+  overlay.classList.add('active');
+}
+function closeMetricInfoModal(){
+  const overlay = document.getElementById('metricInfoOverlay');
+  if(overlay) overlay.classList.remove('active');
+}
+
+/* ---------- resultCopyLinesの解析 ---------- */
+// DA側のbuildResultCopyLines()が返す配列をそのまま埋め込んでいる。
+// 先頭行だけ「撮影日　泳者メモ　体重kg」という特殊な行(コロン区切りではない)。
+// それ以降は基本的に「ラベル: 値」の形式。
+// v3: DA側の一部の行(例:「(内訳: 離台時重心-台端距離): 0.91 m」)は、ラベル自体の中に
+// ": "を含む(「内訳: 」の部分)。そのままだと最初の": "で区切ってしまい、ラベルと数値が
+// 正しく分離できなかったため、最後の": "で区切るように変更した(値は常に行の末尾にある
+// という前提。他の行はラベル内に": "を含まないため、最後で区切っても最初で区切っても
+// 結果は同じで、影響はない)。
+// さらに、この行のラベル自体もDE表示用に短く言い換える(LABEL_OVERRIDES)。
+const LABEL_OVERRIDES = {
+  '(内訳: 離台時重心-台端距離)': '離台時重心-台端距離'
+};
+function parseCopyLines(payload){
+  const lines = (payload && payload.resultCopyLines) || [];
+  const header = lines[0] || '';
+  const headerParts = header.split('\u3000'); // 全角スペース区切り
+  const meta = {
+    shootDate: headerParts[0] || '',
+    swimmerMemo: headerParts[1] || '',
+    mass: headerParts[2] || ''
+  };
+  const rows = [];
+  for(let i=1; i<lines.length; i++){
+    const line = lines[i];
+    const idx = line.lastIndexOf(': ');
+    if(idx < 0){ rows.push([line, '']); continue; }
+    let label = line.slice(0, idx);
+    const value = line.slice(idx+2);
+    if(LABEL_OVERRIDES[label]) label = LABEL_OVERRIDES[label];
+    rows.push([label, value]);
+  }
+  return {meta, rows};
+}
+
+/* ---------- タブ(泳者)関連 ---------- */
+function getSwimmerNames(){
+  const set = new Set();
+  sessions.forEach(s=>{
+    if(s.primarySwimmer) set.add(s.primarySwimmer);
+    (s.referencedSwimmers||[]).forEach(n=>set.add(n));
+  });
+  return Array.from(set).sort((a,b)=>a.localeCompare(b, 'ja'));
+}
+function hasUnclassified(){
+  return sessions.some(s=>!s.primarySwimmer);
+}
+function sessionsForTab(tab){
+  let list;
+  if(tab===ALL_TAB) list = sessions.slice();
+  else if(tab===UNCLASSIFIED_TAB) list = sessions.filter(s=>!s.primarySwimmer);
+  else list = sessions.filter(s=> s.primarySwimmer===tab || (s.referencedSwimmers||[]).includes(tab));
+  return list.sort((a,b)=>(a.order||0)-(b.order||0));
+}
+
+/* ---------- 並べ替え ---------- */
+function moveSession(tab, sessionId, dir){
+  const list = sessionsForTab(tab);
+  const idx = list.findIndex(s=>s.id===sessionId);
+  const swapIdx = idx + dir;
+  if(idx<0 || swapIdx<0 || swapIdx>=list.length) return;
+  const a = list[idx], b = list[swapIdx];
+  const tmp = a.order; a.order = b.order; b.order = tmp;
+  Promise.all([dbPut(a), dbPut(b)]).then(async ()=>{ await reloadSessions(); render(); });
+}
+
+/* ---------- 泳者の割り当て変更・参照の追加/削除 ---------- */
+function renamePrimarySwimmer(sessionId, newName){
+  const s = sessions.find(x=>x.id===sessionId);
+  if(!s) return;
+  const trimmed = (newName||'').trim();
+  s.primarySwimmer = trimmed || null;
+  dbPut(s).then(async ()=>{ await reloadSessions(); render(); });
+}
+function addReference(sessionId){
+  const s = sessions.find(x=>x.id===sessionId);
+  if(!s) return;
+  const names = getSwimmerNames().filter(n=>n!==s.primarySwimmer && !(s.referencedSwimmers||[]).includes(n));
+  const suggestion = names.length ? '\n\n既存の泳者名: '+names.join(' / ') : '';
+  const input = prompt('この分析を「全セッション」以外に、どの泳者のタブにも表示しますか?\n泳者名を入力してください(新しい名前も入力できます)。'+suggestion);
+  if(input==null) return;
+  const name = input.trim();
+  if(!name || name===s.primarySwimmer) return;
+  if(!s.referencedSwimmers) s.referencedSwimmers = [];
+  if(!s.referencedSwimmers.includes(name)) s.referencedSwimmers.push(name);
+  dbPut(s).then(async ()=>{ await reloadSessions(); render(); });
+}
+function removeReference(sessionId, tab){
+  const s = sessions.find(x=>x.id===sessionId);
+  if(!s) return;
+  s.referencedSwimmers = (s.referencedSwimmers||[]).filter(n=>n!==tab);
+  dbPut(s).then(async ()=>{ await reloadSessions(); render(); });
+}
+// タブの文脈によって「削除」(実体を消す)か「参照を外す」(この泳者タブからだけ外す)かが変わる。
+// 全セッションタブ、または本人(primarySwimmer)のタブ、未分類タブから消す場合は実削除。
+// 参照先(referencedSwimmers)のタブから消す場合は、参照を外すだけでデータは残す。
+function deleteOrUnreference(sessionId){
+  const s = sessions.find(x=>x.id===sessionId);
+  if(!s) return;
+  const isReferenceOnly = currentTab!==ALL_TAB && currentTab!==UNCLASSIFIED_TAB &&
+    currentTab!==s.primarySwimmer && (s.referencedSwimmers||[]).includes(currentTab);
+  if(isReferenceOnly){
+    if(!confirm('「'+currentTab+'」タブからの参照を外します。データ自体は削除されません(他のタブには残ります)。よろしいですか?')) return;
+    removeReference(sessionId, currentTab);
+  } else {
+    if(!confirm('このセッションを完全に削除します。元に戻せません。よろしいですか?')) return;
+    dbDelete(sessionId).then(async ()=>{ await reloadSessions(); render(); });
+  }
+}
+
+/* ---------- メモ(DIVE EXPLORER側)の保存 ---------- */
+// キー入力ごとに再描画すると入力中にフォーカスが外れてしまうため、再描画はせず
+// メモリ上のsessionsとIndexedDBだけを更新する(デバウンス)。
+const memoSaveTimers = new Map();
+function updateMemo(sessionId, text){
+  const s = sessions.find(x=>x.id===sessionId);
+  if(!s) return;
+  s.memo = text;
+  clearTimeout(memoSaveTimers.get(sessionId));
+  memoSaveTimers.set(sessionId, setTimeout(()=>{ dbPut(s); }, 400));
+}
+
+/* ---------- 全データの書き出し/読み込み(バージョンアップ・機種変更対策) ----------
+   IndexedDBはブラウザ・アクセス方法(file://か、一時ローカルサーバー経由か等)によって
+   保存領域の区切られ方が変わることがあり、新しいバージョンのDIVE EXPLORERを開いたときに
+   前のバージョンで登録したセッションが見えなくなる可能性がある。それに備えて、全セッションを
+   1つのJSONファイルに書き出し/読み込みできるようにしておく(同じidのセッションは
+   上書きされる形になるため、同じバックアップを読み込んでも重複しない)。 */
+async function exportAllSessions(){
+  const all = await dbGetAll();
+  const payload = { app: 'DIVE EXPLORER', schemaVersion: 1, exportedAt: new Date().toISOString(), sessions: all };
+  const blob = new Blob([JSON.stringify(payload)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const d = new Date();
+  const stamp = d.getFullYear()+(d.getMonth()+1).toString().padStart(2,'0')+d.getDate().toString().padStart(2,'0');
+  a.href = url;
+  a.download = 'dive-explorer-backup-'+stamp+'.json';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 2000);
+}
+async function importAllSessions(file){
+  try{
+    const text = await file.text();
+    const payload = JSON.parse(text);
+    const list = Array.isArray(payload) ? payload : payload.sessions;
+    if(!Array.isArray(list)) throw new Error('バックアップファイルの形式が正しくありません。');
+    // v12: バックアップ内のorderは、そのバックアップを作った時点での並び順を表すだけで、
+    // 現在のセッション一覧のorderとは無関係な数値。そのまま使うと、新しく別途インポート
+    // 済みのセッションのorderと衝突し、同一タブ内で並び替えボタンが反応しなくなったり、
+    // 意図しない表示順序になったりする不具合があった。ここで、現在のセッション一覧の
+    // 最大値より後ろに来るよう、バックアップ内での相対順序を保ったまま振り直す。
+    let maxOrder = sessions.reduce((m,s)=>Math.max(m, s.order||0), 0);
+    const validList = list.filter(s=>s && s.id);
+    const sorted = validList.slice().sort((a,b)=>(a.order||0)-(b.order||0));
+    for(const s of sorted){
+      maxOrder += 1;
+      s.order = maxOrder;
+      await dbPut(s);
+    }
+    await reloadSessions();
+    render();
+    alert(sorted.length+'件のセッションを読み込みました。');
+  }catch(e){
+    alert('バックアップファイルの読み込みに失敗しました: '+e.message);
+  }
+}
+// v11: 全セッションを一括削除する。個別削除を繰り返す手間を省くとともに、
+// currentTabも明示的にALL_TABへ戻す(削除後に古いタブ選択が残らないようにするため)。
+async function deleteAllSessions(){
+  if(sessions.length===0){ alert('削除するセッションがありません。'); return; }
+  if(!confirm('全'+sessions.length+'件のセッションを完全に削除します。元に戻せません。よろしいですか?')) return;
+  for(const s of sessions){
+    await dbDelete(s.id);
+  }
+  currentTab = ALL_TAB;
+  await reloadSessions();
+  render();
+}
+
+
+function fmtDateTime(iso){
+  try{
+    const d = new Date(iso);
+    return d.getFullYear()+'/'+(d.getMonth()+1).toString().padStart(2,'0')+'/'+d.getDate().toString().padStart(2,'0')
+      +' '+d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0');
+  }catch(e){ return iso||''; }
+}
+function escapeHtml(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+// v4: 列幅を狭くしたことで「4.10 m/s (14.77 km/h)」のような値が1行に収まらず列が
+// 広がってしまう。この形式(X m/s (Y km/h))の値だけは、m/sの後で改行して2行表示にする。
+// v7: labelを追加で受け取り、色分け対象の3指標はcolorizeCompareValueに委ねる。
+function formatValueHtml(value, label){
+  if(label==='指先着水時の重心ベクトル角' || label==='重心入水角度' || label==='指先着水時の姿勢角(指先-重心)'){
+    return colorizeCompareValue(label, value);
+  }
+  const m = /^(.+ m\/s) \((.+ km\/h)\)$/.exec(value||'');
+  if(m) return escapeHtml(m[1]) + '<br>(' + escapeHtml(m[2]) + ')';
+  return escapeHtml(value);
+}
+
+// v7: DA側の色分け表示(あくまで目安のガイドライン。緑=良好、赤=要改善)をDEの比較表にも
+// 反映する。DA側のmetricColorClass()と同じ閾値をここに複製している(DA側の閾値を
+// 変更した場合は、こちらも合わせて更新する必要がある)。
+const METRIC_COLOR_RANGES_DE = {
+  fingerVectorAngle: { greenMax: 36.7, redMin: 41.5 },
+  fingerEntryAngle:   { greenMax: 2,    redMin: 8 },
+  entryAngle:         { greenMax: 48.8, redMin: 52.0 }
+};
+function metricColorClassDE(kind, rawValue){
+  const spec = METRIC_COLOR_RANGES_DE[kind];
+  if(!spec || rawValue==null || !isFinite(rawValue)) return '';
+  const v = Math.abs(rawValue);
+  if(v <= spec.greenMax) return 'metricGood';
+  if(v > spec.redMin) return 'metricBad';
+  return '';
+}
+// resultCopyLinesのラベルごとに、値文字列(例:"33.4°"、"12.3°(迎角 -4.1°)")から
+// 該当する数値を取り出して色分けする。「指先着水時の姿勢角(指先-重心)」だけは、
+// 先頭の姿勢角ではなく、括弧内の「迎角」の数値部分だけを色付けする(DA側の表示と揃える)。
+function colorizeCompareValue(label, rawValueStr){
+  if(rawValueStr==null || rawValueStr==='') return escapeHtml(rawValueStr);
+  if(label==='指先着水時の重心ベクトル角' || label==='重心入水角度'){
+    const kind = label==='重心入水角度' ? 'entryAngle' : 'fingerVectorAngle';
+    const num = parseFloat(rawValueStr);
+    const cls = metricColorClassDE(kind, num);
+    const escaped = escapeHtml(rawValueStr);
+    return cls ? '<span class="'+cls+'">'+escaped+'</span>' : escaped;
+  }
+  if(label==='指先着水時の姿勢角(指先-重心)'){
+    const m = /^(.*迎角\s*)(-?\d+(?:\.\d+)?)(°)(.*)$/.exec(rawValueStr);
+    if(m){
+      const num = parseFloat(m[2]);
+      const cls = metricColorClassDE('fingerEntryAngle', num);
+      const numPart = escapeHtml(m[2]+m[3]);
+      const coloredNum = cls ? '<span class="'+cls+'">'+numPart+'</span>' : numPart;
+      return escapeHtml(m[1]) + coloredNum + escapeHtml(m[4]);
+    }
+    return escapeHtml(rawValueStr);
+  }
+  return escapeHtml(rawValueStr);
+}
+// v9: 「離台時の重心の高さ」は絶対的な良し悪しの基準がないため、DA側と同様に固定の
+// cm基準ではなく、同じ泳者(同じセッション)の①指先着水時の重心ベクトル角・③重心入水
+// 角度の判定結果と連動させる。赤=①③のどちらかが赤、緑=①③が両方とも緑、それ以外は
+// 無色(DA側のロジックをそのまま複製。DA側を変更した場合はこちらも合わせて更新が必要)。
+function colorizeH0Value(rawValueStr, sessionMap){
+  if(rawValueStr==null || rawValueStr==='') return escapeHtml(rawValueStr);
+  const fingerVal = sessionMap.get('指先着水時の重心ベクトル角');
+  const entryVal = sessionMap.get('重心入水角度');
+  const fingerCls = metricColorClassDE('fingerVectorAngle', fingerVal!=null ? parseFloat(fingerVal) : NaN);
+  const entryCls = metricColorClassDE('entryAngle', entryVal!=null ? parseFloat(entryVal) : NaN);
+  const cls =
+    (fingerCls==='metricBad' || entryCls==='metricBad') ? 'metricBad'
+    : (fingerCls==='metricGood' && entryCls==='metricGood') ? 'metricGood'
+    : '';
+  const escaped = escapeHtml(rawValueStr);
+  return cls ? '<span class="'+cls+'">'+escaped+'</span>' : escaped;
+}
+
+/* ---------- レンダリング ---------- */
+// v11: currentTabは明示的にタブをクリックしない限り保持され続けるため、セッションの
+// 全件削除や、異なる泳者名でのインポートを経ると「もう存在しない泳者名のタブ」を
+// 指したまま残ってしまうことがあった。この場合、新しく読み込んだセッションがその
+// タブの絞り込み条件に一致せず、画面上は何も表示されない(インポートの順番によって
+// 見えたり見えなかったりする不具合の原因になっていた)。ここで、現在有効なタブの
+// 集合(全セッション・各泳者・未分類)に含まれていなければ、自動的に全セッション
+// タブへ戻す。
+function renderTabs(){
+  const bar = document.getElementById('tabsBar');
+  const swimmers = getSwimmerNames();
+  if(currentTab!==ALL_TAB && currentTab!==UNCLASSIFIED_TAB && !swimmers.includes(currentTab)){
+    currentTab = ALL_TAB;
+  }
+  const tabs = [[ALL_TAB, '全セッション ('+sessions.length+')']];
+  swimmers.forEach(n=>{
+    const count = sessionsForTab(n).length;
+    tabs.push([n, n+' ('+count+')']);
+  });
+  if(hasUnclassified()){
+    tabs.push([UNCLASSIFIED_TAB, '未分類 ('+sessionsForTab(UNCLASSIFIED_TAB).length+')']);
+  }
+  bar.innerHTML = '';
+  tabs.forEach(([key, label])=>{
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.className = (key===currentTab) ? 'active' : '';
+    b.onclick = ()=>{ currentTab = key; render(); };
+    bar.appendChild(b);
+  });
+}
+
+function renderTable(){
+  const wrap = document.getElementById('tableWrap');
+  const emptyState = document.getElementById('emptyState');
+  const list = sessionsForTab(currentTab);
+
+  if(sessions.length===0){
+    emptyState.style.display = 'flex';
+    wrap.innerHTML = '';
+    return;
+  }
+  emptyState.style.display = 'none';
+
+  if(list.length===0){
+    wrap.innerHTML = '<div style="padding:24px;color:var(--sub);font-size:13px;">このタブに表示できるセッションがありません。</div>';
+    return;
+  }
+
+  // 各セッションのresultCopyLinesを解析し、ラベルの出現順を統合したマスター行順序を作る。
+  const parsed = list.map(s=>({session:s, ...parseCopyLines(s.daPayload)}));
+  const seenLabels = new Set();
+  const labelOrder = [];
+  parsed.forEach(p=>{
+    p.rows.forEach(([label])=>{
+      if(!seenLabels.has(label)){ seenLabels.add(label); labelOrder.push(label); }
+    });
+  });
+  const rowMaps = parsed.map(p=>{
+    const m = new Map();
+    p.rows.forEach(([label, value])=>m.set(label, value));
+    return m;
+  });
+
+  let html = '<table id="compareTable"><thead><tr><th>指標</th>';
+  list.forEach((s, i)=>{
+    const payload = s.daPayload;
+    const isReferenceOnly = currentTab!==ALL_TAB && currentTab!==UNCLASSIFIED_TAB &&
+      currentTab!==s.primarySwimmer && (s.referencedSwimmers||[]).includes(currentTab);
+    html += '<th><div class="colHead">'
+      + '<div class="fname" title="タップで生データ表示" onclick="showRawPayload(\''+s.id+'\')" style="cursor:pointer;text-decoration:underline;">'+escapeHtml(s.sourceFileName)+'</div>'
+      + '<div class="impDate">取込: '+fmtDateTime(s.importedAt)+'</div>'
+      + '<div class="swimmerRow"><span>泳者</span>'
+      + '<input type="text" value="'+escapeHtml(s.primarySwimmer||'')+'" placeholder="(未分類)" '
+      + 'onchange="renamePrimarySwimmer(\''+s.id+'\', this.value)"></div>'
+      + '<div class="btnRow">'
+      + '<button class="btn small" onclick="moveSession(\''+currentTab+'\',\''+s.id+'\',-1)"'+(i===0?' disabled':'')+'>◀</button>'
+      + '<button class="btn small" onclick="moveSession(\''+currentTab+'\',\''+s.id+'\',1)"'+(i===list.length-1?' disabled':'')+'>▶</button>'
+      + '<button class="btn small" onclick="addReference(\''+s.id+'\')">参照</button>'
+      + '<button class="btn small warn" onclick="deleteOrUnreference(\''+s.id+'\')">'+(isReferenceOnly?'外す':'削除')+'</button>'
+      + '</div>'
+      + '</div></th>';
+  });
+  html += '</tr></thead><tbody>';
+
+  // 撮影日・泳者メモ・体重(DA側の先頭行から)
+  html += '<tr class="sectionRow"><td>撮影情報</td>' + list.map(()=>'<td></td>').join('') + '</tr>';
+  ['撮影日','泳者メモ','体重(kg)'].forEach((label, li)=>{
+    html += '<tr><td>'+label+'</td>';
+    parsed.forEach(p=>{
+      const v = li===0 ? p.meta.shootDate : li===1 ? p.meta.swimmerMemo : p.meta.mass;
+      html += '<td>'+escapeHtml(v)+'</td>';
+    });
+    html += '</tr>';
+  });
+
+  // DIVE EXPLORER側のメモ・元ファイル情報
+  html += '<tr><td>メモ</td>';
+  list.forEach(s=>{
+    html += '<td><textarea class="memoBox" oninput="updateMemo(\''+s.id+'\', this.value)">'+escapeHtml(s.memo)+'</textarea></td>';
+  });
+  html += '</tr>';
+
+  // 画像(軌道画像・ブロック期3画像)
+  html += '<tr class="sectionRow"><td>画像</td>' + list.map(()=>'<td></td>').join('') + '</tr>';
+  html += '<tr><td>軌道画像</td>';
+  list.forEach(s=>{
+    const url = s.daPayload.trajectoryImageDataUrl;
+    html += '<td>'+(url ? '<img class="thumbImg" src="'+url+'">' : '-')+'</td>';
+  });
+  html += '</tr>';
+  html += '<tr><td>ブロック期3画像</td>';
+  list.forEach(s=>{
+    const url = s.daPayload.blockPhaseImageDataUrl;
+    html += '<td>'+(url ? '<img class="thumbImg" src="'+url+'">' : '(未実施)')+'</td>';
+  });
+  html += '</tr>';
+
+  // 指標本体(ブロック期詳細分析の区切りは、DA側のラベルパターンで判定)
+  html += '<tr class="sectionRow"><td>分析結果</td>' + list.map(()=>'<td></td>').join('') + '</tr>';
+  labelOrder.forEach(label=>{
+    const isBlockSection = (label==='ブロックタイム(始動前〜離台)');
+    if(isBlockSection){
+      html += '<tr class="sectionRow"><td>ブロック期詳細分析</td>' + list.map(()=>'<td></td>').join('') + '</tr>';
+    }
+    const info = findMetricInfoForLabel(list, label);
+    const infoIconHtml = info ? ' <span class="infoIcon" data-label="'+escapeHtml(label)+'">ⓘ</span>' : '';
+    html += '<tr><td>'+escapeHtml(label)+infoIconHtml+'</td>';
+    rowMaps.forEach(m=>{
+      let cellHtml = '-';
+      if(m.has(label)){
+        cellHtml = (label==='離台時の重心の高さ') ? colorizeH0Value(m.get(label), m) : formatValueHtml(m.get(label), label);
+      }
+      html += '<td>'+cellHtml+'</td>';
+    });
+    html += '</tr>';
+  });
+
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+function render(){
+  renderTabs();
+  renderTable();
+}
+
+/* ---------- 初期化 ---------- */
+document.getElementById('importBtn').addEventListener('click', ()=>{
+  document.getElementById('importBox').click();
+});
+document.getElementById('importBox').addEventListener('change', (e)=>{
+  handleFiles(e.target.files);
+  e.target.value = '';
+});
+document.getElementById('backupToggleBtn').addEventListener('click', ()=>{
+  const bar = document.getElementById('backupBar');
+  const btn = document.getElementById('backupToggleBtn');
+  const showing = bar.style.display !== 'none';
+  bar.style.display = showing ? 'none' : 'flex';
+  btn.textContent = showing ? '▼' : '▲';
+});
+document.getElementById('backupExportBtn').addEventListener('click', exportAllSessions);
+document.getElementById('backupImportBtn').addEventListener('click', ()=>{
+  document.getElementById('backupImportBox').click();
+});
+document.getElementById('backupImportBox').addEventListener('change', (e)=>{
+  const f = e.target.files[0];
+  if(f) importAllSessions(f);
+  e.target.value = '';
+});
+document.getElementById('deleteAllBtn').addEventListener('click', deleteAllSessions);
+
+document.getElementById('tableWrap').addEventListener('click', (e)=>{
+  const icon = e.target.closest('.infoIcon');
+  if(!icon) return;
+  const label = icon.getAttribute('data-label');
+  const list = sessionsForTab(currentTab);
+  const info = findMetricInfoForLabel(list, label);
+  if(info) showMetricInfoModal(info.title, info.bodyHtml);
+});
+
+(async function init(){
+  await reloadSessions();
+  render();
+})();
+</script>
+</body>
+</html>
