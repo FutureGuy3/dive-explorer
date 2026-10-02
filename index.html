@@ -4,12 +4,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DIVE EXPLORER</title>
-<link rel="shortcut icon" href="favicon.ico">
-<link rel="icon" href="icon-192.png">
-<link rel="icon" sizes="512x512" href="icon-512.png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
-<link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#0b0f0e">
 <style>
   /* 配色・トークンはDIVE ANALYZER(DA)のものをそのまま踏襲する。 */
   :root{
@@ -113,7 +107,10 @@
   .colHead .btnRow{display:flex;gap:3px;flex-wrap:wrap;}
   .colHead .btnRow .btn.small{padding:3px 5px;font-size:9.5px;}
   .thumbImg{max-width:105px;border-radius:5px;display:block;}
-  textarea.memoBox{width:70px;height:44px;font-size:10.5px;resize:vertical;}
+  /* v15: 幅を画像(.thumbImg)と同じく列の実幅に合わせ(100%)、ドラッグでの高さ変更欄
+     (resize)は撤去。代わりに入力文字数に応じてJS側(autoGrowMemoBox)で高さを自動調整する。
+     min-heightは旧来の初期高さ(44px)を下限として維持。 */
+  textarea.memoBox{width:100%;min-height:44px;font-size:10.5px;resize:none;box-sizing:border-box;overflow:hidden;}
 
   #importBox,#backupImportBox{display:none;}
 
@@ -497,6 +494,13 @@ function deleteOrUnreference(sessionId){
 }
 
 /* ---------- メモ(DIVE EXPLORER側)の保存 ---------- */
+// v15: 入力文字数に応じて高さを自動調整する(ドラッグでの手動リサイズの代わり)。
+// 一旦heightを'auto'に戻してscrollHeight(実際に必要な高さ)を測り直してから適用する
+// (そうしないと、文字を減らしたときに高さが縮まらない)。
+function autoGrowMemoBox(el){
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
+}
 // キー入力ごとに再描画すると入力中にフォーカスが外れてしまうため、再描画はせず
 // メモリ上のsessionsとIndexedDBだけを更新する(デバウンス)。
 const memoSaveTimers = new Map();
@@ -749,7 +753,7 @@ function renderTable(){
   // DIVE EXPLORER側のメモ・元ファイル情報
   html += '<tr><td>メモ</td>';
   list.forEach(s=>{
-    html += '<td><textarea class="memoBox" oninput="updateMemo(\''+s.id+'\', this.value)">'+escapeHtml(s.memo)+'</textarea></td>';
+    html += '<td><textarea class="memoBox" oninput="autoGrowMemoBox(this);updateMemo(\''+s.id+'\', this.value)">'+escapeHtml(s.memo)+'</textarea></td>';
   });
   html += '</tr>';
 
@@ -790,6 +794,9 @@ function renderTable(){
 
   html += '</tbody></table>';
   wrap.innerHTML = html;
+  // v15: 既に入力済みのメモがある場合、最初から内容に応じた高さで表示する
+  // (クリックして初めて正しい高さになる、という状態を避ける)。
+  wrap.querySelectorAll('textarea.memoBox').forEach(autoGrowMemoBox);
 }
 
 function render(){
