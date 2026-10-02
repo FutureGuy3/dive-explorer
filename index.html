@@ -95,15 +95,19 @@
   table#compareTable tbody td{white-space:normal;}
   table#compareTable tr.sectionRow td{background:rgba(61,220,151,0.06);color:var(--accent2);font-weight:700;white-space:normal;}
   table#compareTable tr.sectionRow td:first-child{background:rgba(61,220,151,0.06);}
-  .colHead{display:flex;flex-direction:column;gap:3px;min-width:70px;max-width:70px;}
+  /* v16: 列の実幅(画像・メモ欄に合わせた幅)いっぱいに使うよう、max-widthの70px固定を
+     撤去してwidth:100%に変更。min-width:70pxは、画像等がまだ無いセッションで列が
+     狭すぎて崩れないようにするための下限として残す。 */
+  .colHead{display:flex;flex-direction:column;gap:3px;min-width:70px;width:100%;box-sizing:border-box;}
   .colHead .fname{
     font-size:10px;color:var(--sub);font-family:inherit;
-    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;
   }
   .colHead .impDate{font-size:9.5px;color:var(--sub);}
   .colHead .swimmerRow{display:flex;gap:3px;align-items:center;}
   .colHead .swimmerRow span{font-size:10px;color:var(--sub);flex:0 0 auto;}
-  .colHead input[type=text]{width:38px;font-size:10.5px;padding:4px 5px;}
+  /* v16: 「泳者」ラベルの残り幅いっぱいに使うようflex:1に変更(旧来は固定38px)。 */
+  .colHead input[type=text]{flex:1 1 auto;min-width:0;width:auto;font-size:10.5px;padding:4px 5px;}
   .colHead .btnRow{display:flex;gap:3px;flex-wrap:wrap;}
   .colHead .btnRow .btn.small{padding:3px 5px;font-size:9.5px;}
   .thumbImg{max-width:105px;border-radius:5px;display:block;}
@@ -247,6 +251,16 @@ async function reloadSessions(){
 
 function uid(){
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+// v16: 泳者メモの表示用。"name@"の部分は泳者特定のための入力で、既に上の「泳者」欄に
+// 転記されているため、表示上は"@"より後ろの部分だけを見せる(元データ自体は変更しない。
+// detectSwimmerFromMemo()と同じ、最初の"@"で区切る考え方)。
+function swimmerMemoDisplayText(memo){
+  if(!memo) return memo;
+  const idx = memo.indexOf('@');
+  if(idx < 0) return memo;
+  return memo.slice(idx+1);
 }
 
 /* ---------- 泳者名の自動検出 ---------- */
@@ -744,7 +758,7 @@ function renderTable(){
   ['撮影日','泳者メモ','体重(kg)'].forEach((label, li)=>{
     html += '<tr><td>'+label+'</td>';
     parsed.forEach(p=>{
-      const v = li===0 ? p.meta.shootDate : li===1 ? p.meta.swimmerMemo : p.meta.mass;
+      const v = li===0 ? p.meta.shootDate : li===1 ? swimmerMemoDisplayText(p.meta.swimmerMemo) : p.meta.mass;
       html += '<td>'+escapeHtml(v)+'</td>';
     });
     html += '</tr>';
