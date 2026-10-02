@@ -95,10 +95,13 @@
   table#compareTable tbody td{white-space:normal;}
   table#compareTable tr.sectionRow td{background:rgba(61,220,151,0.06);color:var(--accent2);font-weight:700;white-space:normal;}
   table#compareTable tr.sectionRow td:first-child{background:rgba(61,220,151,0.06);}
-  /* v16: 列の実幅(画像・メモ欄に合わせた幅)いっぱいに使うよう、max-widthの70px固定を
-     撤去してwidth:100%に変更。min-width:70pxは、画像等がまだ無いセッションで列が
-     狭すぎて崩れないようにするための下限として残す。 */
-  .colHead{display:flex;flex-direction:column;gap:3px;min-width:70px;width:100%;box-sizing:border-box;}
+  /* v18: v16でmax-widthの70px固定をwidth:100%に変えたところ、ファイル名が長い
+     セッションで列全体がファイル名の長さに引っ張られて広がってしまう不具合が発生した
+     (%指定は列幅を決める計算の段階では効かず、ファイル名の自然な長さがそのまま列幅の
+     基準になってしまうため)。固定px幅に戻すことで解決しつつ、v16の目的(泳者名入力欄を
+     もっと広く使えるようにする)は保つため、70pxではなく画像(.thumbImg)と同じ105pxに
+     している。削除ボタンの行が収まる幅として、画像の幅に揃えるのが自然という判断。 */
+  .colHead{display:flex;flex-direction:column;gap:3px;width:105px;max-width:105px;box-sizing:border-box;}
   .colHead .fname{
     font-size:10px;color:var(--sub);font-family:inherit;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;
@@ -108,8 +111,10 @@
   .colHead .swimmerRow span{font-size:10px;color:var(--sub);flex:0 0 auto;}
   /* v16: 「泳者」ラベルの残り幅いっぱいに使うようflex:1に変更(旧来は固定38px)。 */
   .colHead input[type=text]{flex:1 1 auto;min-width:0;width:auto;font-size:10.5px;padding:4px 5px;}
-  .colHead .btnRow{display:flex;gap:3px;flex-wrap:wrap;}
-  .colHead .btnRow .btn.small{padding:3px 5px;font-size:9.5px;}
+  /* v19: 「参照」「削除」ボタンが折り返されて2行になってしまうため、もう一段階小さく
+     (padding/font-sizeを縮小、gapも詰める)して105px幅の列に1行で収まるようにした。 */
+  .colHead .btnRow{display:flex;gap:2px;flex-wrap:wrap;}
+  .colHead .btnRow .btn.small{padding:2px 4px;font-size:8.5px;}
   .thumbImg{max-width:105px;border-radius:5px;display:block;}
   /* v15: 幅を画像(.thumbImg)と同じく列の実幅に合わせ(100%)、ドラッグでの高さ変更欄
      (resize)は撤去。代わりに入力文字数に応じてJS側(autoGrowMemoBox)で高さを自動調整する。
