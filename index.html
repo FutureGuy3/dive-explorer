@@ -91,8 +91,12 @@
   /* v5: 折り返し不可(nowrap)のままだと、他の行の長い値(例:「32.7°(迎角 9.5°)」)に
      引っ張られて列全体が広がってしまい、min-widthを縮めても見た目に反映されなかった。
      値セル(tbody側)は折り返しを許可し、列の幅は基本的にmin-widthに従うようにする。
-     見出し(thead)側は元々内部の要素(ファイル名の省略表示等)で幅を制御しているので対象外。 */
-  table#compareTable tbody td{white-space:normal;}
+     見出し(thead)側は元々内部の要素(ファイル名の省略表示等)で幅を制御しているので対象外。
+     v20: white-space:normalだけでは、空白のない長い文字列(例:「動画ファイル名」行の
+     "VID20260827161715.mp4"のような、スペースを含まない実際の動画ファイル名)は折り返す
+     場所がなく、そのままセル・列全体を押し広げてしまう不具合があった。overflow-wrap:anywhere
+     を追加し、他に折り返せる場所がない場合は単語の途中でも折り返せるようにして解決。 */
+  table#compareTable tbody td{white-space:normal;overflow-wrap:anywhere;}
   table#compareTable tr.sectionRow td{background:rgba(61,220,151,0.06);color:var(--accent2);font-weight:700;white-space:normal;}
   table#compareTable tr.sectionRow td:first-child{background:rgba(61,220,151,0.06);}
   /* v18: v16でmax-widthの70px固定をwidth:100%に変えたところ、ファイル名が長い
