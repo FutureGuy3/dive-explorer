@@ -149,6 +149,20 @@
   #metricInfoBody td{padding:3px 2px;border-bottom:1px solid var(--line);}
   #metricInfoBody .note{font-size:11px;color:var(--sub);}
 
+  /* v21: 軌道画像・ブロック期3画像をタップしたときの拡大表示(画像ビューア)。
+     metricInfoOverlayとは別の、画像専用のよりシンプルなオーバーレイ。 */
+  #imageViewerOverlay{
+    display:none;position:fixed;inset:0;z-index:110;background:rgba(0,0,0,0.92);
+    align-items:center;justify-content:center;padding:16px;
+  }
+  #imageViewerOverlay.active{display:flex;}
+  #imageViewerOverlay img{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px;}
+  #imageViewerCloseBtn{
+    position:fixed;top:14px;right:16px;z-index:111;
+    background:rgba(20,20,20,0.75);border:1px solid var(--line);color:var(--text);
+    font-size:22px;line-height:1;padding:6px 13px;border-radius:50%;cursor:pointer;
+  }
+
   /* v7: DA側の色分け表示(あくまで目安のガイドライン)をDEの比較表にも反映する。 */
   .metricGood{color:var(--accent2);font-weight:700;}
   .metricBad{color:var(--danger);font-weight:700;}
@@ -403,6 +417,30 @@ function showMetricInfoModal(title, bodyHtml){
 }
 function closeMetricInfoModal(){
   const overlay = document.getElementById('metricInfoOverlay');
+  if(overlay) overlay.classList.remove('active');
+}
+
+/* ---------- 画像の拡大表示(軌道画像・ブロック期3画像タップ時) ---------- */
+// v21: PCブラウザではピンチイン拡大ができないため、タップで全画面ポップアップ表示する。
+// クリックされた<img>自身のsrc(this.src)を読むだけなので、既に長いdata URLをHTML内に
+// 二重に埋め込む必要がない。
+function openImageViewer(url){
+  if(!url) return;
+  let overlay = document.getElementById('imageViewerOverlay');
+  if(!overlay){
+    overlay = document.createElement('div');
+    overlay.id = 'imageViewerOverlay';
+    overlay.innerHTML = '<button id="imageViewerCloseBtn" onclick="closeImageViewer()">✕</button>'
+      + '<img id="imageViewerImg" src="">';
+    // 画像自体ではなく、背景部分がタップされたときも閉じられるようにする。
+    overlay.onclick = (e)=>{ if(e.target===overlay) closeImageViewer(); };
+    document.body.appendChild(overlay);
+  }
+  document.getElementById('imageViewerImg').src = url;
+  overlay.classList.add('active');
+}
+function closeImageViewer(){
+  const overlay = document.getElementById('imageViewerOverlay');
   if(overlay) overlay.classList.remove('active');
 }
 
@@ -785,13 +823,13 @@ function renderTable(){
   html += '<tr><td>軌道画像</td>';
   list.forEach(s=>{
     const url = s.daPayload.trajectoryImageDataUrl;
-    html += '<td>'+(url ? '<img class="thumbImg" src="'+url+'">' : '-')+'</td>';
+    html += '<td>'+(url ? '<img class="thumbImg" src="'+url+'" style="cursor:pointer" onclick="openImageViewer(this.src)">' : '-')+'</td>';
   });
   html += '</tr>';
   html += '<tr><td>ブロック期3画像</td>';
   list.forEach(s=>{
     const url = s.daPayload.blockPhaseImageDataUrl;
-    html += '<td>'+(url ? '<img class="thumbImg" src="'+url+'">' : '(未実施)')+'</td>';
+    html += '<td>'+(url ? '<img class="thumbImg" src="'+url+'" style="cursor:pointer" onclick="openImageViewer(this.src)">' : '(未実施)')+'</td>';
   });
   html += '</tr>';
 
