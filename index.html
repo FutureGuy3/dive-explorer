@@ -4,6 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DIVE EXPLORER</title>
+<link rel="shortcut icon" href="favicon.ico">
+<link rel="icon" href="icon-192.png">
+<link rel="icon" sizes="512x512" href="icon-512.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0b0f0e">
 <style>
   /* 配色・トークンはDIVE ANALYZER(DA)のものをそのまま踏襲する。 */
   :root{
@@ -163,6 +169,55 @@
     font-size:22px;line-height:1;padding:6px 13px;border-radius:50%;cursor:pointer;
   }
 
+  /* v22: 並べ替え専用パネル(全画面オーバーレイ)。比較表とは別に、セッションを縦一覧にして
+     「≡」のつかみ手をドラッグして並べ替える。つかみ手(.reorderHandle)だけがドラッグ操作を
+     受け付け(touch-action:none)、行の本体部分は通常の縦スクロールのまま、という分担にして、
+     スクロールしようとして誤って行を動かしてしまうことを避けている。 */
+  #reorderOverlay{
+    display:none;position:fixed;inset:0;z-index:120;background:var(--bg);flex-direction:column;
+  }
+  #reorderOverlay.active{display:flex;}
+  #reorderHeader{
+    display:flex;align-items:center;justify-content:space-between;gap:8px;
+    padding:10px 14px;background:var(--panel);border-bottom:1px solid var(--line);flex:0 0 auto;
+  }
+  #reorderTitle{font-size:14px;color:var(--accent2);font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  #reorderHeader .btnGroup{display:flex;gap:6px;flex:0 0 auto;}
+  #reorderHint{font-size:11px;color:var(--sub);padding:6px 14px;background:var(--panel);border-bottom:1px solid var(--line);flex:0 0 auto;}
+  #reorderList{
+    flex:1;overflow-y:auto;padding:10px 10px 28px;position:relative;
+    -webkit-user-select:none;user-select:none;overscroll-behavior:contain;
+  }
+  .reorderRow{
+    display:flex;align-items:stretch;background:var(--panel2);border:1px solid var(--line);
+    border-radius:10px;margin-bottom:8px;position:relative;
+  }
+  .reorderRow.shifting{transition:transform .14s ease;}
+  .reorderRow.dragging{
+    z-index:5;border-color:var(--accent2);box-shadow:0 6px 18px rgba(0,0,0,0.55);transition:none;
+  }
+  .reorderRow.moved{animation:reorderMovedFlash 1s ease-out;}
+  @keyframes reorderMovedFlash{from{background:rgba(61,220,151,0.28);}to{background:var(--panel2);}}
+  .reorderHandle{
+    flex:0 0 48px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+    border-right:1px solid var(--line);color:var(--sub);cursor:grab;
+    touch-action:none;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;
+  }
+  .reorderRow.dragging .reorderHandle{cursor:grabbing;color:var(--accent2);}
+  .reorderHandle .grip{font-size:22px;line-height:1;}
+  .reorderHandle .num{font-size:10px;font-family:var(--mono);}
+  .reorderBody{flex:1;min-width:0;padding:7px 10px;font-size:12px;line-height:1.45;}
+  .reorderBody .rHead{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:2px;}
+  .reorderBody .rSwimmer{color:var(--accent2);font-weight:700;font-size:13px;}
+  .reorderBody .rDate{color:var(--sub);font-family:var(--mono);font-size:11px;}
+  .reorderBody .rKV{display:flex;gap:8px;align-items:baseline;}
+  .reorderBody .rKV .k{flex:0 0 56px;color:var(--sub);font-size:10.5px;}
+  .reorderBody .rKV .v{flex:1;min-width:0;color:var(--text);overflow-wrap:anywhere;}
+  .reorderBody .rKV .v.clamp{
+    display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;white-space:pre-line;
+  }
+  .reorderBody .rKV .v.mono{font-family:var(--mono);}
+
   /* v7: DA側の色分け表示(あくまで目安のガイドライン)をDEの比較表にも反映する。 */
   .metricGood{color:var(--accent2);font-weight:700;}
   .metricBad{color:var(--danger);font-weight:700;}
@@ -180,6 +235,7 @@
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center;">
       <button class="btn small" id="backupToggleBtn">▼</button>
+      <button class="btn small" id="reorderBtn" disabled>並べ替え</button>
       <button class="btn primary" id="importBtn">DAのhtml読み込み</button>
     </div>
   </div>
@@ -508,6 +564,295 @@ function moveSession(tab, sessionId, dir){
   const a = list[idx], b = list[swapIdx];
   const tmp = a.order; a.order = b.order; b.order = tmp;
   Promise.all([dbPut(a), dbPut(b)]).then(async ()=>{ await reloadSessions(); render(); });
+}
+
+/* ---------- 並べ替え専用パネル(v22) ---------- */
+// 「並べ替え」ボタンで開く全画面パネル。現在のタブに表示中のセッションを縦一覧にし、
+// 各行左端の「≡」をドラッグして並べ替える。ドラッグ中の並びはメモリ上(reorderState.workIds)
+// にだけ保持し、「完了」を押した時点で初めてorder値としてIndexedDBに保存する(「キャンセル」
+// なら何も変えない)。比較表側の◀▶ボタン(moveSession)は従来どおり残している。
+var reorderState = null;   // {tab, baseIds, workIds}: パネルが開いている間の状態
+var reorderDrag = null;    // ドラッグ操作中だけ存在する一時状態
+
+function tabDisplayName(tab){
+  if(tab===ALL_TAB) return '全セッション';
+  if(tab===UNCLASSIFIED_TAB) return '未分類';
+  return tab;
+}
+
+// 並べ替え後の並び(workIds)を、実際のorder値にどう反映するかを計算する(純粋関数)。
+// list: 現在のタブの並び(order昇順)、workIds: 新しい並びのid配列、allSessions: 全セッション。
+// 方針: そのタブに含まれるセッションが現在持っているorder値の「集合」を、新しい並び順に
+// 割り当て直す(◀▶ボタンの「隣と値を入れ替える」を一般化したもの)。こうすると、そのタブに
+// 含まれないセッションとの相対的な並びを崩さずに済む。
+// 例外: order値に重複・欠損がある場合は、値の集合を使い回すと並びを表現できないので、
+// 全体の最大値より後ろに新しい値を振る(v12で重複は解消済みのため通常は通らない経路)。
+// 戻り値: 値が変わるものだけの [id, 新order] の配列。list/workIdsが食い違えばnull。
+function computeReorderAssignments(list, workIds, allSessions){
+  const cur = new Map(list.map(s=>[s.id, s]));
+  if(workIds.length!==list.length || !workIds.every(id=>cur.has(id))) return null;
+  const isNum = v => typeof v==='number' && isFinite(v);
+  const vals = list.map(s=>s.order);
+  let newOrders;
+  const sorted = vals.every(isNum) ? vals.slice().sort((a,b)=>a-b) : null;
+  if(sorted && sorted.every((v,i)=>i===0 || v>sorted[i-1])){
+    newOrders = sorted;
+  }else{
+    const maxAll = allSessions.reduce((m,s)=>Math.max(m, isNum(s.order)?s.order:0), 0);
+    newOrders = workIds.map((_,i)=>maxAll+1+i);
+  }
+  const result = [];
+  workIds.forEach((id,i)=>{
+    if(cur.get(id).order !== newOrders[i]) result.push([id, newOrders[i]]);
+  });
+  return result;
+}
+
+// パネルの各行に表示する情報(泳者・撮影日・泳者メモ・水平速度・DE側メモ)。
+// 水平速度は、比較表と同じくresultCopyLinesの「離台時の水平速度」行の値をそのまま使う。
+function getReorderInfo(s){
+  const p = parseCopyLines(s.daPayload);
+  let speed = '';
+  for(const [label, value] of p.rows){
+    if(label==='離台時の水平速度'){ speed = value; break; }
+  }
+  return {
+    swimmer: s.primarySwimmer || '(未分類)',
+    shootDate: p.meta.shootDate || '',
+    swimmerMemo: swimmerMemoDisplayText(p.meta.swimmerMemo) || '',
+    speed: speed,
+    memo: s.memo || ''
+  };
+}
+function reorderKvHtml(label, value, clamp, mono){
+  const v = (value==null || String(value).trim()==='') ? '-' : value;
+  return '<div class="rKV"><span class="k">'+label+'</span><span class="v'
+    +(clamp?' clamp':'')+(mono?' mono':'')+'">'+escapeHtml(v)+'</span></div>';
+}
+
+function renderReorderList(movedId){
+  const list = document.getElementById('reorderList');
+  const prevScroll = list.scrollTop;
+  const byId = new Map(sessions.map(s=>[s.id, s]));
+  let html = '';
+  reorderState.workIds.forEach((id, i)=>{
+    const s = byId.get(id);
+    if(!s) return;
+    const info = getReorderInfo(s);
+    html += '<div class="reorderRow'+(id===movedId?' moved':'')+'" data-id="'+escapeHtml(id)+'">'
+      + '<div class="reorderHandle" data-id="'+escapeHtml(id)+'" title="ドラッグして並べ替え">'
+      + '<span class="grip">≡</span><span class="num">'+(i+1)+'</span></div>'
+      + '<div class="reorderBody">'
+      + '<div class="rHead"><span class="rSwimmer">'+escapeHtml(info.swimmer)+'</span>'
+      + '<span class="rDate">'+escapeHtml(info.shootDate||'-')+'</span></div>'
+      + reorderKvHtml('泳者メモ', info.swimmerMemo, true, false)
+      + reorderKvHtml('水平速度', info.speed, false, true)
+      + reorderKvHtml('メモ', info.memo, true, false)
+      + '</div></div>';
+  });
+  list.innerHTML = html;
+  list.scrollTop = prevScroll;
+}
+
+function openReorderPanel(){
+  const list = sessionsForTab(currentTab);
+  if(list.length<2) return;
+  reorderState = {
+    tab: currentTab,
+    baseIds: list.map(s=>s.id),
+    workIds: list.map(s=>s.id)
+  };
+  let overlay = document.getElementById('reorderOverlay');
+  if(!overlay){
+    overlay = document.createElement('div');
+    overlay.id = 'reorderOverlay';
+    overlay.innerHTML = '<div id="reorderHeader"><div id="reorderTitle"></div>'
+      + '<div class="btnGroup"><button class="btn small" id="reorderCancelBtn">キャンセル</button>'
+      + '<button class="btn primary" id="reorderDoneBtn">完了</button></div></div>'
+      + '<div id="reorderHint">左の「≡」を押さえたままドラッグして並べ替えます。「完了」を押すまで確定されません。</div>'
+      + '<div id="reorderList"></div>';
+    document.body.appendChild(overlay);
+    document.getElementById('reorderDoneBtn').addEventListener('click', finishReorder);
+    document.getElementById('reorderCancelBtn').addEventListener('click', cancelReorder);
+    const listEl = document.getElementById('reorderList');
+    listEl.addEventListener('pointerdown', (e)=>{
+      const h = e.target.closest('.reorderHandle');
+      if(h) startReorderDrag(e, h.getAttribute('data-id'));
+    });
+    // 長押しでAndroidのコンテキストメニュー等が出て、ドラッグが中断されるのを防ぐ。
+    listEl.addEventListener('contextmenu', (e)=>{
+      if(e.target.closest('.reorderHandle')) e.preventDefault();
+    });
+  }
+  document.getElementById('reorderTitle').textContent =
+    '並べ替え — '+tabDisplayName(currentTab)+' ('+list.length+')';
+  document.getElementById('reorderList').scrollTop = 0;
+  renderReorderList(null);
+  overlay.classList.add('active');
+}
+function closeReorderPanel(){
+  const overlay = document.getElementById('reorderOverlay');
+  if(overlay) overlay.classList.remove('active');
+  reorderState = null;
+}
+function reorderIsChanged(){
+  return !!reorderState && reorderState.workIds.some((id,i)=>id!==reorderState.baseIds[i]);
+}
+function cancelReorder(){
+  if(!reorderState) return;
+  if(reorderDrag) endReorderDrag(false);
+  if(reorderIsChanged() && !confirm('並べ替えを破棄して、元の並びのまま戻りますか？')) return;
+  closeReorderPanel();
+}
+async function finishReorder(){
+  if(!reorderState) return;
+  if(reorderDrag) endReorderDrag(false);
+  const st = reorderState;
+  if(reorderIsChanged()){
+    const assign = computeReorderAssignments(sessionsForTab(st.tab), st.workIds, sessions);
+    if(!assign){
+      alert('並べ替えを保存できませんでした。一度閉じて、もう一度お試しください。');
+      return;
+    }
+    const byId = new Map(sessions.map(s=>[s.id, s]));
+    const puts = [];
+    assign.forEach(([id, order])=>{
+      const s = byId.get(id);
+      s.order = order;
+      puts.push(dbPut(s));
+    });
+    await Promise.all(puts);
+    await reloadSessions();
+  }
+  closeReorderPanel();
+  render();
+}
+
+/* --- ドラッグ操作 ---
+   行そのものはDOM上で動かさず(つかみ手がpointer captureを失わないように)、CSSのtransformで
+   見かけ上ずらすだけにする。ドラッグ中の行は指に追従し、その上下の行は空きを作るように
+   ずれる。指を離した時点で、メモリ上の並び(workIds)を更新して一覧を描き直す。 */
+function startReorderDrag(e, id){
+  if(reorderDrag || !reorderState) return;
+  if(e.pointerType==='mouse' && e.button!==0) return;
+  const list = document.getElementById('reorderList');
+  const rows = Array.from(list.querySelectorAll('.reorderRow'));
+  const from = rows.findIndex(r=>r.getAttribute('data-id')===id);
+  if(from<0 || rows.length<2) return;
+  e.preventDefault();
+  const rects = rows.map(r=>({top:r.offsetTop, h:r.offsetHeight}));
+  const gap = rects[1].top - (rects[0].top + rects[0].h);
+  const lr = list.getBoundingClientRect();
+  reorderDrag = {
+    id, from, to: from, rows, rects, gap,
+    clientY: e.clientY,
+    startContentY: e.clientY - lr.top + list.scrollTop,
+    pointerId: e.pointerId,
+    handle: e.target.closest('.reorderHandle'),
+    raf: 0
+  };
+  rows.forEach((r,i)=>r.classList.add(i===from ? 'dragging' : 'shifting'));
+  try{ reorderDrag.handle.setPointerCapture(e.pointerId); }catch(_){}
+  window.addEventListener('pointermove', onReorderPointerMove);
+  window.addEventListener('pointerup', onReorderPointerUp);
+  window.addEventListener('pointercancel', onReorderPointerCancel);
+  window.addEventListener('touchmove', onReorderTouchMove, {passive:false});
+  reorderDrag.raf = requestAnimationFrame(reorderAutoScrollTick);
+  updateReorderDrag();
+}
+function onReorderPointerMove(e){
+  if(!reorderDrag || e.pointerId!==reorderDrag.pointerId) return;
+  reorderDrag.clientY = e.clientY;
+  updateReorderDrag();
+}
+function onReorderPointerUp(e){
+  if(!reorderDrag || e.pointerId!==reorderDrag.pointerId) return;
+  endReorderDrag(true);
+}
+function onReorderPointerCancel(e){
+  if(!reorderDrag || e.pointerId!==reorderDrag.pointerId) return;
+  endReorderDrag(false);
+}
+// ドラッグ中に画面(リスト)が指に引きずられてスクロールしてしまうのを念のため止める。
+function onReorderTouchMove(e){
+  if(reorderDrag && e.cancelable) e.preventDefault();
+}
+function updateReorderDrag(){
+  const d = reorderDrag;
+  if(!d) return;
+  const list = document.getElementById('reorderList');
+  const n = d.rows.length;
+  const cy = d.clientY - list.getBoundingClientRect().top + list.scrollTop;
+  let dy = cy - d.startContentY;
+  // 先頭より上・末尾より下にははみ出さない
+  const fromRect = d.rects[d.from];
+  const minDy = d.rects[0].top - fromRect.top;
+  const maxDy = (d.rects[n-1].top + d.rects[n-1].h) - (fromRect.top + fromRect.h);
+  dy = Math.max(minDy, Math.min(maxDy, dy));
+  // 挿入先: 進行方向側の端(下に動かすなら下端、上に動かすなら上端)が、相手の行の
+  // 中央を越えたら、その行を飛び越えたものとして数える。行の中心同士で比べるより、
+  // 半行ぶん動かした時点で入れ替わるので反応が良く、上下どちらの向きでも対称になる。
+  let to = d.from;
+  if(dy>0){
+    const edge = fromRect.top + fromRect.h + dy;
+    for(let i=d.from+1; i<n; i++){
+      if(d.rects[i].top + d.rects[i].h/2 < edge) to = i; else break;
+    }
+  }else if(dy<0){
+    const edge = fromRect.top + dy;
+    for(let i=d.from-1; i>=0; i--){
+      if(d.rects[i].top + d.rects[i].h/2 > edge) to = i; else break;
+    }
+  }
+  d.to = to;
+  const step = fromRect.h + d.gap;
+  d.rows.forEach((r,i)=>{
+    if(i===d.from){ r.style.transform = 'translateY('+dy+'px)'; return; }
+    let shift = 0;
+    if(d.from<to && i>d.from && i<=to) shift = -step;
+    else if(d.from>to && i>=to && i<d.from) shift = step;
+    r.style.transform = shift ? 'translateY('+shift+'px)' : '';
+  });
+}
+// 指がリストの上端・下端に近づいたら自動でスクロールする(件数が多く、行き先が
+// 画面外にある場合に、ドラッグしたまま運べるようにするため)。
+function reorderAutoScrollTick(){
+  const d = reorderDrag;
+  if(!d) return;
+  const list = document.getElementById('reorderList');
+  const r = list.getBoundingClientRect();
+  const zone = 56, maxSpeed = 16;
+  let v = 0;
+  if(d.clientY < r.top + zone) v = -maxSpeed * Math.min(1, (r.top + zone - d.clientY)/zone);
+  else if(d.clientY > r.bottom - zone) v = maxSpeed * Math.min(1, (d.clientY - (r.bottom - zone))/zone);
+  if(v){
+    v = Math.sign(v) * Math.max(1, Math.round(Math.abs(v)));
+    const before = list.scrollTop;
+    list.scrollTop = before + v;
+    if(list.scrollTop!==before) updateReorderDrag();
+  }
+  d.raf = requestAnimationFrame(reorderAutoScrollTick);
+}
+function endReorderDrag(commit){
+  const d = reorderDrag;
+  if(!d) return;
+  reorderDrag = null;
+  cancelAnimationFrame(d.raf);
+  window.removeEventListener('pointermove', onReorderPointerMove);
+  window.removeEventListener('pointerup', onReorderPointerUp);
+  window.removeEventListener('pointercancel', onReorderPointerCancel);
+  window.removeEventListener('touchmove', onReorderTouchMove, {passive:false});
+  try{ d.handle.releasePointerCapture(d.pointerId); }catch(_){}
+  d.rows.forEach(r=>{ r.style.transform=''; r.classList.remove('dragging','shifting'); });
+  let movedId = null;
+  if(commit && d.to!==d.from){
+    const ids = d.rows.map(r=>r.getAttribute('data-id'));
+    const moved = ids.splice(d.from, 1)[0];
+    ids.splice(d.to, 0, moved);
+    reorderState.workIds = ids;
+    movedId = moved;
+  }
+  renderReorderList(movedId);
 }
 
 /* ---------- 泳者の割り当て変更・参照の追加/削除 ---------- */
@@ -863,6 +1208,8 @@ function renderTable(){
 function render(){
   renderTabs();
   renderTable();
+  // v22: 並べ替えは2件以上あるタブでだけ意味があるので、それ未満なら押せないようにする。
+  document.getElementById('reorderBtn').disabled = sessionsForTab(currentTab).length < 2;
 }
 
 /* ---------- 初期化 ---------- */
@@ -890,6 +1237,7 @@ document.getElementById('backupImportBox').addEventListener('change', (e)=>{
   e.target.value = '';
 });
 document.getElementById('deleteAllBtn').addEventListener('click', deleteAllSessions);
+document.getElementById('reorderBtn').addEventListener('click', openReorderPanel);
 
 document.getElementById('tableWrap').addEventListener('click', (e)=>{
   const icon = e.target.closest('.infoIcon');
