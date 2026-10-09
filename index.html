@@ -43,7 +43,7 @@
   #topbar h1 .byline{font-size:11px;color:var(--sub);letter-spacing:0.02em;font-weight:400;margin-left:4px;}
   #topbar .sub{font-size:11px;color:var(--sub);}
   #backupBar{
-    display:flex;gap:6px;padding:8px 14px;background:var(--panel);
+    display:flex;flex-wrap:wrap;gap:6px;padding:8px 14px;background:var(--panel);
     border-bottom:1px solid var(--line);flex:0 0 auto;
   }
 
@@ -218,6 +218,50 @@
   }
   .reorderBody .rKV .v.mono{font-family:var(--mono);}
 
+  /* v23: 数値データエクスポート用パネル(全画面オーバーレイ)。並べ替えパネルの行デザイン
+     (.reorderRow/.reorderBody)を流用し、左端の「つかみ手」の代わりにチェックボックスを置く。 */
+  #numExpOverlay{
+    display:none;position:fixed;inset:0;z-index:130;background:var(--bg);flex-direction:column;
+  }
+  #numExpOverlay.active{display:flex;}
+  #nxHeader{
+    display:flex;align-items:center;justify-content:space-between;gap:8px;
+    padding:10px 14px;background:var(--panel);border-bottom:1px solid var(--line);flex:0 0 auto;
+  }
+  #nxTitle{font-size:14px;color:var(--accent2);font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  #nxHeader .btnGroup{display:flex;gap:6px;flex:0 0 auto;}
+  #nxHint{font-size:11px;color:var(--sub);padding:6px 14px;background:var(--panel);border-bottom:1px solid var(--line);flex:0 0 auto;line-height:1.5;}
+  #nxTools{display:none;padding:8px 14px;background:var(--panel);border-bottom:1px solid var(--line);flex:0 0 auto;}
+  #nxTools .nxToolRow{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
+  #nxTools .nxCount{font-size:11px;color:var(--sub);margin-left:auto;font-family:var(--mono);}
+  #nxChips{display:none;gap:6px;flex-wrap:wrap;margin-top:8px;max-height:92px;overflow-y:auto;}
+  .nxChip{
+    border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:999px;
+    padding:4px 10px;font-size:11px;cursor:pointer;white-space:nowrap;
+  }
+  .nxChip.part{border-color:var(--accent2);color:var(--accent2);}
+  .nxChip.on{background:var(--accent2);border-color:var(--accent2);color:#04211a;font-weight:700;}
+  #nxList{flex:1;overflow-y:auto;padding:10px 10px 28px;overscroll-behavior:contain;}
+  .nxRow{cursor:pointer;-webkit-tap-highlight-color:transparent;}
+  .nxRow.checked{border-color:var(--accent2);background:rgba(61,220,151,0.10);}
+  .nxCheck{
+    flex:0 0 48px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+    border-right:1px solid var(--line);color:var(--sub);
+  }
+  .nxCheck .box{
+    width:22px;height:22px;border:2px solid var(--sub);border-radius:6px;display:flex;
+    align-items:center;justify-content:center;font-size:15px;line-height:1;color:transparent;
+  }
+  .nxRow.checked .box{background:var(--accent2);border-color:var(--accent2);color:#04211a;}
+  .nxCheck .num{font-size:10px;font-family:var(--mono);}
+  .nxScopeBtn{
+    display:block;width:100%;text-align:left;background:var(--panel2);color:var(--text);
+    border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:10px;cursor:pointer;
+  }
+  .nxScopeBtn:disabled{opacity:.35;cursor:default;}
+  .nxScopeBtn .t{font-size:15px;font-weight:700;color:var(--accent2);}
+  .nxScopeBtn .d{font-size:11.5px;color:var(--sub);margin-top:4px;line-height:1.5;}
+
   /* v7: DA側の色分け表示(あくまで目安のガイドライン)をDEの比較表にも反映する。 */
   .metricGood{color:var(--accent2);font-weight:700;}
   .metricBad{color:var(--danger);font-weight:700;}
@@ -240,8 +284,9 @@
     </div>
   </div>
   <div id="backupBar" style="display:none;">
-    <button class="btn small" id="backupExportBtn">全データを書き出す</button>
-    <button class="btn small" id="backupImportBtn">書き出したデータを読み込む</button>
+    <button class="btn small primary" id="numExpBtn">数値データエクスポート</button>
+    <button class="btn small" id="backupExportBtn">バックアップを書き出す</button>
+    <button class="btn small" id="backupImportBtn">バックアップを読み込む</button>
     <button class="btn small warn" id="deleteAllBtn">全データを削除</button>
   </div>
 
@@ -943,6 +988,11 @@ async function importAllSessions(file){
   try{
     const text = await file.text();
     const payload = JSON.parse(text);
+    // v23: 数値データエクスポートのファイルは画像を含まない。同じidのセッションを上書きして
+    // 既存の画像を失わせないよう、バックアップとしての読み込みは受け付けない。
+    if(payload && !Array.isArray(payload) && payload.kind==='numeric-export'){
+      throw new Error('これは「数値データエクスポート」のファイルです。画像を含まないため、バックアップとしては読み込めません(読み込むと既存セッションの画像が失われます)。');
+    }
     const list = Array.isArray(payload) ? payload : payload.sessions;
     if(!Array.isArray(list)) throw new Error('バックアップファイルの形式が正しくありません。');
     // v12: バックアップ内のorderは、そのバックアップを作った時点での並び順を表すだけで、
@@ -1212,6 +1262,303 @@ function render(){
   document.getElementById('reorderBtn').disabled = sessionsForTab(currentTab).length < 2;
 }
 
+/* ---------- 数値データエクスポート(v23) ----------
+   分析用に、画像を除いた数値データだけをJSONファイル1つにまとめて書き出す。
+   範囲: ①全データ ②特定の泳者(複数選択可。「参照」として追加表示しているだけの
+   セッションは含めず、その泳者が本人(primarySwimmer)のものだけ) ③任意のデータ(チェック方式)。
+   書き出す中身: 各セッションのDE側の情報(id・泳者の割り当て・DE側メモ・取り込み元ファイル名など)と、
+   DAのJSON(daPayload)から画像データ(data:image/...)だけを除いたもの。除いた項目のパスは
+   各セッションのremovedImagePathsに記録する。
+   選択は「書き出す」を押した時に初めて確定する(全データは範囲を選んだ時点で書き出す)。 */
+const DE_VERSION = 'v23';
+var nxState = null;   // {step:'scope'|'swimmers'|'pick', keys:Set(泳者キー), ids:Set(セッションid)}
+
+function nxKeyOf(s){ return s.primarySwimmer || UNCLASSIFIED_TAB; }
+function nxLabelOfKey(k){ return k===UNCLASSIFIED_TAB ? '(未分類)' : k; }
+function nxByOrder(a, b){ return (a.order||0)-(b.order||0); }
+// 泳者(primarySwimmerごと)のグループ。未分類は最後。
+function nxGroups(){
+  const map = new Map();
+  sessions.forEach(s=>{
+    const k = nxKeyOf(s);
+    if(!map.has(k)) map.set(k, []);
+    map.get(k).push(s);
+  });
+  const keys = Array.from(map.keys()).filter(k=>k!==UNCLASSIFIED_TAB)
+    .sort((a,b)=>a.localeCompare(b, 'ja'));
+  if(map.has(UNCLASSIFIED_TAB)) keys.push(UNCLASSIFIED_TAB);
+  return keys.map(k=>({key:k, label:nxLabelOfKey(k), list:map.get(k).slice().sort(nxByOrder)}));
+}
+
+// 画像データ(data:image/... 等の文字列)を除いた複製を作る。巨大な画像文字列を
+// 複製しないよう、structuredCloneは使わず、画像以外だけを新しく組み立てる。
+// removedには除いた項目のパスを積む。
+function nxStripImages(v, path, removed){
+  if(typeof v==='string'){
+    if(/^data:(image|video|audio)\//i.test(v)){ removed.push(path); return undefined; }
+    return v;
+  }
+  if(Array.isArray(v)){
+    return v.map((x,i)=>{
+      const r = nxStripImages(x, path+'['+i+']', removed);
+      return r===undefined ? null : r;
+    });
+  }
+  if(v && typeof v==='object'){
+    const o = {};
+    for(const k of Object.keys(v)){
+      const r = nxStripImages(v[k], path ? path+'.'+k : k, removed);
+      if(r!==undefined) o[k] = r;
+    }
+    return o;
+  }
+  return v;
+}
+function nxBuildRecord(s){
+  const removed = [];
+  const payload = nxStripImages(s.daPayload, '', removed);
+  return Object.assign({}, s, {daPayload: payload, removedImagePaths: removed});
+}
+function nxStamp(){
+  const d = new Date();
+  const p = n=>String(n).padStart(2,'0');
+  return d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+'-'+p(d.getHours())+p(d.getMinutes());
+}
+// scope: 'all' | 'swimmers' | 'selected'。戻り値: {count, fileName}
+function nxExport(scope, list, swimmerLabels){
+  const recs = list.slice().sort(nxByOrder).map(nxBuildRecord);
+  const out = {
+    app: 'DIVE EXPLORER',
+    kind: 'numeric-export',
+    schemaVersion: 1,
+    appVersion: DE_VERSION,
+    exportedAt: new Date().toISOString(),
+    scope: scope,
+    count: recs.length,
+    note: '画像データを除いた数値データ。sessions[].daPayloadはDAの書き出しJSONから画像データ(Data URL形式の文字列)を除いたもの。除いた項目のパスはremovedImagePathsに記録。',
+    sessions: recs
+  };
+  if(swimmerLabels) out.swimmers = swimmerLabels;
+  const fileName = 'dive-explorer-numeric-'+scope+'-'+nxStamp()+'.json';
+  const blob = new Blob([JSON.stringify(out, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 2000);
+  return {count: recs.length, fileName: fileName};
+}
+
+function nxEnsureOverlay(){
+  let ov = document.getElementById('numExpOverlay');
+  if(ov) return ov;
+  ov = document.createElement('div');
+  ov.id = 'numExpOverlay';
+  ov.innerHTML = '<div id="nxHeader"><div id="nxTitle"></div>'
+    + '<div class="btnGroup"><button class="btn small" id="nxBackBtn">閉じる</button>'
+    + '<button class="btn primary" id="nxDoneBtn">書き出す</button></div></div>'
+    + '<div id="nxHint"></div>'
+    + '<div id="nxTools"><div class="nxToolRow">'
+    + '<button class="btn small" id="nxAllBtn">全選択</button>'
+    + '<button class="btn small" id="nxNoneBtn">全解除</button>'
+    + '<span class="nxCount" id="nxCount"></span></div>'
+    + '<div id="nxChips"></div></div>'
+    + '<div id="nxList"></div>';
+  document.body.appendChild(ov);
+  document.getElementById('nxBackBtn').addEventListener('click', nxBack);
+  document.getElementById('nxDoneBtn').addEventListener('click', nxDone);
+  document.getElementById('nxAllBtn').addEventListener('click', ()=>nxSetAll(true));
+  document.getElementById('nxNoneBtn').addEventListener('click', ()=>nxSetAll(false));
+  document.getElementById('nxChips').addEventListener('click', (e)=>{
+    const c = e.target.closest('.nxChip');
+    if(c) nxToggleGroup(c.getAttribute('data-key'));
+  });
+  document.getElementById('nxList').addEventListener('click', (e)=>{
+    const sb = e.target.closest('.nxScopeBtn');
+    if(sb){ if(!sb.disabled) nxChooseScope(sb.getAttribute('data-scope')); return; }
+    const row = e.target.closest('.nxRow');
+    if(!row || !nxState) return;
+    if(nxState.step==='swimmers'){
+      const k = row.getAttribute('data-key');
+      if(nxState.keys.has(k)) nxState.keys.delete(k); else nxState.keys.add(k);
+    }else if(nxState.step==='pick'){
+      const id = row.getAttribute('data-id');
+      if(nxState.ids.has(id)) nxState.ids.delete(id); else nxState.ids.add(id);
+    }
+    nxUpdate();
+  });
+  return ov;
+}
+
+function openNumExport(){
+  if(sessions.length===0){ alert('書き出すセッションがありません。'); return; }
+  nxState = {step:'scope', keys:new Set(), ids:new Set()};
+  const ov = nxEnsureOverlay();
+  nxShowStep('scope');
+  ov.classList.add('active');
+}
+function closeNumExport(){
+  const ov = document.getElementById('numExpOverlay');
+  if(ov) ov.classList.remove('active');
+  nxState = null;
+}
+function nxBack(){
+  if(!nxState) return;
+  if(nxState.step==='scope') closeNumExport();
+  else nxShowStep('scope');
+}
+
+function nxShowStep(step){
+  nxState.step = step;
+  const list = document.getElementById('nxList');
+  const tools = document.getElementById('nxTools');
+  const chips = document.getElementById('nxChips');
+  const done = document.getElementById('nxDoneBtn');
+  const title = document.getElementById('nxTitle');
+  const hint = document.getElementById('nxHint');
+  list.scrollTop = 0;
+  if(step==='scope'){
+    title.textContent = '数値データエクスポート';
+    hint.textContent = '画像を除いた数値データ(指標・カメラ/動画設定・確定フレーム・座標点・DE側のメモなど)を、JSONファイル1つに書き出します。範囲を選んでください。';
+    tools.style.display = 'none';
+    done.style.display = 'none';
+    document.getElementById('nxBackBtn').textContent = '閉じる';
+    const groups = nxGroups();
+    list.innerHTML =
+        '<button class="nxScopeBtn" data-scope="all"><div class="t">全データ</div>'
+      + '<div class="d">読み込み済みの全'+sessions.length+'件を書き出します(押すとすぐ書き出します)。</div></button>'
+      + '<button class="nxScopeBtn" data-scope="swimmers"><div class="t">特定の泳者のデータ</div>'
+      + '<div class="d">泳者を選んで(複数可)、その泳者のセッションを書き出します。全'+groups.length+'区分。</div></button>'
+      + '<button class="nxScopeBtn" data-scope="pick"><div class="t">任意のデータ</div>'
+      + '<div class="d">一覧からチェックを入れたセッションだけを書き出します。</div></button>';
+    return;
+  }
+  done.style.display = '';
+  tools.style.display = 'block';
+  document.getElementById('nxBackBtn').textContent = '戻る';
+  if(step==='swimmers'){
+    title.textContent = 'エクスポート — 泳者を選択';
+    hint.textContent = '書き出す泳者にチェックを入れてください(複数可)。「参照」として追加表示しているだけのセッションは含まれません(その泳者本人のものだけ)。「書き出す」を押すまで確定されません。';
+    chips.style.display = 'none';
+    const groups = nxGroups();
+    let html = '';
+    groups.forEach((g, i)=>{
+      const dates = g.list.map(s=>getReorderInfo(s).shootDate).filter(Boolean).sort();
+      const range = dates.length ? (dates[0]===dates[dates.length-1] ? dates[0] : dates[0]+' 〜 '+dates[dates.length-1]) : '-';
+      html += '<div class="reorderRow nxRow" data-key="'+escapeHtml(g.key)+'">'
+        + '<div class="nxCheck"><span class="box">✓</span><span class="num">'+(i+1)+'</span></div>'
+        + '<div class="reorderBody">'
+        + '<div class="rHead"><span class="rSwimmer">'+escapeHtml(g.label)+'</span>'
+        + '<span class="rDate">'+g.list.length+'件</span></div>'
+        + reorderKvHtml('撮影日', range, false, true)
+        + '</div></div>';
+    });
+    list.innerHTML = html;
+  }else{
+    title.textContent = 'エクスポート — データを選択';
+    hint.textContent = '書き出すデータにチェックを入れてください。泳者名のボタンで、その泳者の分をまとめてチェック/解除できます。「書き出す」を押すまで確定されません。';
+    chips.style.display = 'flex';
+    const groups = nxGroups();
+    chips.innerHTML = groups.map(g=>'<button class="nxChip" data-key="'+escapeHtml(g.key)+'">'
+      +escapeHtml(g.label)+' ('+g.list.length+')</button>').join('');
+    const all = sessionsForTab(ALL_TAB);
+    let html = '';
+    all.forEach((s, i)=>{
+      const info = getReorderInfo(s);
+      html += '<div class="reorderRow nxRow" data-id="'+escapeHtml(s.id)+'">'
+        + '<div class="nxCheck"><span class="box">✓</span><span class="num">'+(i+1)+'</span></div>'
+        + '<div class="reorderBody">'
+        + '<div class="rHead"><span class="rSwimmer">'+escapeHtml(info.swimmer)+'</span>'
+        + '<span class="rDate">'+escapeHtml(info.shootDate||'-')+'</span></div>'
+        + reorderKvHtml('泳者メモ', info.swimmerMemo, true, false)
+        + reorderKvHtml('水平速度', info.speed, false, true)
+        + reorderKvHtml('メモ', info.memo, true, false)
+        + '</div></div>';
+    });
+    list.innerHTML = html;
+  }
+  nxUpdate();
+}
+
+// 現在のチェック状態に対応するセッション一覧
+function nxSelectedSessions(){
+  if(!nxState) return [];
+  if(nxState.step==='swimmers') return sessions.filter(s=>nxState.keys.has(nxKeyOf(s)));
+  if(nxState.step==='pick') return sessions.filter(s=>nxState.ids.has(s.id));
+  return [];
+}
+// 画面(行・ボタン・件数表示)を現在のチェック状態に合わせる。一覧は描き直さない(スクロール位置を保つ)。
+function nxUpdate(){
+  if(!nxState || nxState.step==='scope') return;
+  const rows = document.querySelectorAll('#nxList .nxRow');
+  const selected = nxSelectedSessions();
+  if(nxState.step==='swimmers'){
+    rows.forEach(r=>r.classList.toggle('checked', nxState.keys.has(r.getAttribute('data-key'))));
+    document.getElementById('nxCount').textContent =
+      '泳者 '+nxState.keys.size+'/'+nxGroups().length+' ・ '+selected.length+'件';
+  }else{
+    rows.forEach(r=>r.classList.toggle('checked', nxState.ids.has(r.getAttribute('data-id'))));
+    document.getElementById('nxCount').textContent = selected.length+' / '+sessions.length+'件';
+    const groups = nxGroups();
+    document.querySelectorAll('#nxChips .nxChip').forEach(c=>{
+      const g = groups.find(x=>x.key===c.getAttribute('data-key'));
+      const n = g ? g.list.filter(s=>nxState.ids.has(s.id)).length : 0;
+      c.classList.toggle('on', !!g && n===g.list.length && n>0);
+      c.classList.toggle('part', !!g && n>0 && n<g.list.length);
+    });
+  }
+  const done = document.getElementById('nxDoneBtn');
+  done.disabled = selected.length===0;
+  done.textContent = '書き出す ('+selected.length+'件)';
+}
+function nxSetAll(on){
+  if(!nxState) return;
+  if(nxState.step==='swimmers'){
+    nxState.keys = on ? new Set(nxGroups().map(g=>g.key)) : new Set();
+  }else if(nxState.step==='pick'){
+    nxState.ids = on ? new Set(sessions.map(s=>s.id)) : new Set();
+  }
+  nxUpdate();
+}
+// 泳者ボタン: その泳者の分が全部チェック済みなら全解除、そうでなければ全チェック
+function nxToggleGroup(key){
+  if(!nxState || nxState.step!=='pick') return;
+  const g = nxGroups().find(x=>x.key===key);
+  if(!g) return;
+  const allOn = g.list.every(s=>nxState.ids.has(s.id));
+  g.list.forEach(s=>{ if(allOn) nxState.ids.delete(s.id); else nxState.ids.add(s.id); });
+  nxUpdate();
+}
+function nxChooseScope(scope){
+  if(!nxState) return;
+  if(scope==='all'){
+    const r = nxExport('all', sessions.slice(), null);
+    closeNumExport();
+    alert(r.count+'件の数値データを書き出しました。\n'+r.fileName);
+  }else if(scope==='swimmers'){
+    nxShowStep('swimmers');
+  }else if(scope==='pick'){
+    nxShowStep('pick');
+  }
+}
+function nxDone(){
+  if(!nxState) return;
+  const list = nxSelectedSessions();
+  if(list.length===0) return;
+  let r;
+  if(nxState.step==='swimmers'){
+    const labels = nxGroups().filter(g=>nxState.keys.has(g.key)).map(g=>g.label);
+    r = nxExport('swimmers', list, labels);
+  }else{
+    r = nxExport('selected', list, null);
+  }
+  closeNumExport();
+  alert(r.count+'件の数値データを書き出しました。\n'+r.fileName);
+}
+
 /* ---------- 初期化 ---------- */
 document.getElementById('importBtn').addEventListener('click', ()=>{
   document.getElementById('importBox').click();
@@ -1237,6 +1584,7 @@ document.getElementById('backupImportBox').addEventListener('change', (e)=>{
   e.target.value = '';
 });
 document.getElementById('deleteAllBtn').addEventListener('click', deleteAllSessions);
+document.getElementById('numExpBtn').addEventListener('click', openNumExport);
 document.getElementById('reorderBtn').addEventListener('click', openReorderPanel);
 
 document.getElementById('tableWrap').addEventListener('click', (e)=>{
