@@ -263,8 +263,9 @@
 
   /* v24: YouTubeリンク。「画像」見出し行の空きセルに置く再生ボタンと、一番下の入力欄。 */
   .ytBtn{
-    background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:7px;
+    display:inline-block;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:7px;
     padding:3px 8px;font-size:10.5px;cursor:pointer;white-space:nowrap;font-weight:400;
+    text-decoration:none;
   }
   .ytBtn .tri{color:#ff3b3b;margin-right:3px;}
   table#compareTable td.ytInputCell input[type=text]{width:100%;min-width:0;font-size:10.5px;padding:4px 5px;}
@@ -1025,8 +1026,11 @@ function autoGrowMemoBox(el){
 // メモリ上のsessionsとIndexedDBだけを更新する(デバウンス)。
 /* ---------- YouTubeリンク(v24) ----------
    セッションごとにYouTubeのURLを保存し、有効なリンクなら「画像」見出し行の空きセルに
-   再生ボタンを出す。ボタンをタップするとYouTubeアプリで開く(Androidではintent URLで
-   YouTubeアプリを指定し、アプリが無ければブラウザで開く。それ以外の環境では新しいタブ)。
+   再生ボタンを出す。ボタンは通常のリンク(<a href=https://...>)で、新しいタブで開く。
+   AndroidでYouTubeアプリが開くかどうかは、端末とブラウザ側の設定に任せる(アプリのリンク
+   処理)。v24ではAndroid用にintent://のURLでYouTubeアプリを直接指定していたが、Braveで
+   「YouTubeリンクをBraveで開く」設定が有効だと ERR_UNKNOWN_URL_SCHEME のエラーページに
+   なり、元の画面にも戻れなくなるため、v25で通常リンクに変更した。
    入力文字列は利用者が貼ったままをyoutubeUrlに保存し、有効かどうかは表示のたびに判定する
    (間違って貼っても、直せるように)。http(s)かつYouTube系のホストだけを受け付け、
    それ以外(javascript:等)はボタンを出さない。 */
@@ -1059,26 +1063,10 @@ function parseYoutubeUrl(str){
   return u.href;
 }
 function youtubeButtonHtml(s){
-  if(!parseYoutubeUrl(s.youtubeUrl)) return '';
-  return '<button class="ytBtn" title="YouTubeで動画を開く" onclick="playYoutube(\''+escapeHtml(s.id)+'\')">'
-    + '<span class="tri">▶</span>YouTube</button>';
-}
-// 起動に使うURLを作る。Androidはintent://でYouTubeアプリを指定(アプリが無ければfallbackでhttps)。
-function buildYoutubeLaunchUrl(httpsUrl, isAndroid){
-  if(!isAndroid) return httpsUrl;
-  return 'intent://'+httpsUrl.slice('https://'.length)
-    + '#Intent;scheme=https;package=com.google.android.youtube;S.browser_fallback_url='
-    + encodeURIComponent(httpsUrl)+';end';
-}
-function playYoutube(sessionId){
-  const s = sessions.find(x=>x.id===sessionId);
-  if(!s) return;
   const url = parseYoutubeUrl(s.youtubeUrl);
-  if(!url) return;
-  const isAndroid = /Android/i.test(navigator.userAgent||'');
-  const launch = buildYoutubeLaunchUrl(url, isAndroid);
-  if(isAndroid) window.location.href = launch;
-  else window.open(launch, '_blank', 'noopener');
+  if(!url) return '';
+  return '<a class="ytBtn" href="'+escapeHtml(url)+'" target="_blank" rel="noopener noreferrer" title="YouTubeで動画を開く">'
+    + '<span class="tri">▶</span>YouTube</a>';
 }
 // 入力のたびに表全体を描き直すと入力中のフォーカスが外れるため、該当列のボタンと警告表示だけを更新する。
 function refreshYoutubeCell(sessionId){
@@ -1440,7 +1428,7 @@ function render(){
    DAのJSON(daPayload)から画像データ(data:image/...)だけを除いたもの。除いた項目のパスは
    各セッションのremovedImagePathsに記録する。
    選択は「書き出す」を押した時に初めて確定する(全データは範囲を選んだ時点で書き出す)。 */
-const DE_VERSION = 'v24';
+const DE_VERSION = 'v25';
 var nxState = null;   // {step:'scope'|'swimmers'|'pick', keys:Set(泳者キー), ids:Set(セッションid)}
 
 function nxKeyOf(s){ return s.primarySwimmer || UNCLASSIFIED_TAB; }
