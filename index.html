@@ -116,7 +116,6 @@
     font-size:10px;color:var(--sub);font-family:inherit;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;
   }
-  .colHead .impDate{font-size:9.5px;color:var(--sub);}
   .colHead .swimmerRow{display:flex;gap:3px;align-items:center;}
   .colHead .swimmerRow span{font-size:10px;color:var(--sub);flex:0 0 auto;}
   /* v16: 「泳者」ラベルの残り幅いっぱいに使うようflex:1に変更(旧来は固定38px)。 */
@@ -262,6 +261,16 @@
   .nxScopeBtn .t{font-size:15px;font-weight:700;color:var(--accent2);}
   .nxScopeBtn .d{font-size:11.5px;color:var(--sub);margin-top:4px;line-height:1.5;}
 
+  /* v24: YouTubeリンク。「画像」見出し行の空きセルに置く再生ボタンと、一番下の入力欄。 */
+  .ytBtn{
+    background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:7px;
+    padding:3px 8px;font-size:10.5px;cursor:pointer;white-space:nowrap;font-weight:400;
+  }
+  .ytBtn .tri{color:#ff3b3b;margin-right:3px;}
+  table#compareTable td.ytInputCell input[type=text]{width:100%;min-width:0;font-size:10.5px;padding:4px 5px;}
+  table#compareTable td.ytInputCell input.bad{border-color:var(--danger);}
+  table#compareTable td.ytInputCell .ytWarn{font-size:9.5px;color:var(--danger);margin-top:2px;}
+
   /* v7: DA側の色分け表示(あくまで目安のガイドライン)をDEの比較表にも反映する。 */
   .metricGood{color:var(--accent2);font-weight:700;}
   .metricBad{color:var(--danger);font-weight:700;}
@@ -285,6 +294,7 @@
   </div>
   <div id="backupBar" style="display:none;">
     <button class="btn small primary" id="numExpBtn">数値データエクスポート</button>
+    <button class="btn small" id="tabReorderBtn" disabled>泳者タブの並べ替え</button>
     <button class="btn small" id="backupExportBtn">バックアップを書き出す</button>
     <button class="btn small" id="backupImportBtn">バックアップを読み込む</button>
     <button class="btn small warn" id="deleteAllBtn">全データを削除</button>
@@ -315,6 +325,7 @@
      detectedSwimmer,       // 泳者メモの先頭の"@"より前の部分から自動検出(不変)
      primarySwimmer,        // 実際に割り当てられている泳者名(手動で変更可。既定値=detectedSwimmer)
      referencedSwimmers,    // 参照として追加表示している他の泳者名の配列
+     youtubeUrl,            // v24: 動画のYouTubeリンク(任意。利用者が貼り付けた文字列そのまま)
      daPayload              // DA側のJSON全体(result, blockResult, resultCopyLines, 画像など)
    }
 ============================================================ */
@@ -581,13 +592,37 @@ function parseCopyLines(payload){
 }
 
 /* ---------- タブ(泳者)関連 ---------- */
+// v24: 泳者タブの並び順(泳者名の配列)。ブラウザのlocalStorageに保存する(IndexedDBの
+// 構造は変えない)。「全セッション」は常に先頭、「未分類」は常に末尾に固定し、並べ替えの
+// 対象は泳者タブだけ。保存された順序にない泳者(新しく増えたもの)は、従来どおり五十音順で
+// 末尾に並ぶ。バックアップ(書き出し/読み込み)にも含める。
+const TAB_ORDER_KEY = 'DiveExplorer.tabOrder';
+function loadTabOrder(){
+  try{
+    const v = JSON.parse(localStorage.getItem(TAB_ORDER_KEY) || '[]');
+    return Array.isArray(v) ? v.filter(x=>typeof x==='string') : [];
+  }catch(e){ return []; }
+}
+function saveTabOrder(arr){
+  try{ localStorage.setItem(TAB_ORDER_KEY, JSON.stringify(arr)); return true; }
+  catch(e){ return false; }
+}
 function getSwimmerNames(){
   const set = new Set();
   sessions.forEach(s=>{
     if(s.primarySwimmer) set.add(s.primarySwimmer);
     (s.referencedSwimmers||[]).forEach(n=>set.add(n));
   });
-  return Array.from(set).sort((a,b)=>a.localeCompare(b, 'ja'));
+  const stored = loadTabOrder();
+  const rank = new Map();
+  stored.forEach((n,i)=>{ if(!rank.has(n)) rank.set(n, i); });
+  return Array.from(set).sort((a,b)=>{
+    const ra = rank.has(a), rb = rank.has(b);
+    if(ra && rb) return rank.get(a)-rank.get(b);
+    if(ra) return -1;
+    if(rb) return 1;
+    return a.localeCompare(b, 'ja');
+  });
 }
 function hasUnclassified(){
   return sessions.some(s=>!s.primarySwimmer);
@@ -616,7 +651,7 @@ function moveSession(tab, sessionId, dir){
 // 各行左端の「≡」をドラッグして並べ替える。ドラッグ中の並びはメモリ上(reorderState.workIds)
 // にだけ保持し、「完了」を押した時点で初めてorder値としてIndexedDBに保存する(「キャンセル」
 // なら何も変えない)。比較表側の◀▶ボタン(moveSession)は従来どおり残している。
-var reorderState = null;   // {tab, baseIds, workIds}: パネルが開いている間の状態
+var reorderState = null;   // {kind:'sessions'|'tabs', tab, baseIds, workIds}: パネルが開いている間の状態
 var reorderDrag = null;    // ドラッグ操作中だけ存在する一時状態
 
 function tabDisplayName(tab){
@@ -680,6 +715,19 @@ function renderReorderList(movedId){
   const prevScroll = list.scrollTop;
   const byId = new Map(sessions.map(s=>[s.id, s]));
   let html = '';
+  if(reorderState.kind==='tabs'){
+    // v24: 泳者タブの並べ替え。行は泳者名と件数だけの簡素な表示。
+    reorderState.workIds.forEach((name, i)=>{
+      html += '<div class="reorderRow tabRow'+(name===movedId?' moved':'')+'" data-id="'+escapeHtml(name)+'">'
+        + '<div class="reorderHandle" data-id="'+escapeHtml(name)+'" title="ドラッグして並べ替え">'
+        + '<span class="grip">≡</span><span class="num">'+(i+1)+'</span></div>'
+        + '<div class="reorderBody"><div class="rHead"><span class="rSwimmer">'+escapeHtml(name)+'</span>'
+        + '<span class="rDate">'+sessionsForTab(name).length+'件</span></div></div></div>';
+    });
+    list.innerHTML = html;
+    list.scrollTop = prevScroll;
+    return;
+  }
   reorderState.workIds.forEach((id, i)=>{
     const s = byId.get(id);
     if(!s) return;
@@ -699,14 +747,24 @@ function renderReorderList(movedId){
   list.scrollTop = prevScroll;
 }
 
-function openReorderPanel(){
-  const list = sessionsForTab(currentTab);
-  if(list.length<2) return;
-  reorderState = {
-    tab: currentTab,
-    baseIds: list.map(s=>s.id),
-    workIds: list.map(s=>s.id)
-  };
+// v24: kind==='tabs'のときは、セッションではなく泳者タブの並べ替え(ids=泳者名)。
+function openReorderPanel(kind){
+  if(kind!=='tabs') kind = 'sessions';
+  let title, hint, ids;
+  if(kind==='tabs'){
+    ids = getSwimmerNames();
+    if(ids.length<2) return;
+    title = '泳者タブの並べ替え ('+ids.length+')';
+    hint = '左の「≡」を押さえたままドラッグして並べ替えます。「全セッション」は先頭、「未分類」は末尾に固定されます。「完了」を押すまで確定されません。';
+    reorderState = { kind:'tabs', tab:null, baseIds:ids.slice(), workIds:ids.slice() };
+  }else{
+    const list = sessionsForTab(currentTab);
+    if(list.length<2) return;
+    ids = list.map(s=>s.id);
+    title = '並べ替え — '+tabDisplayName(currentTab)+' ('+list.length+')';
+    hint = '左の「≡」を押さえたままドラッグして並べ替えます。「完了」を押すまで確定されません。';
+    reorderState = { kind:'sessions', tab: currentTab, baseIds: ids.slice(), workIds: ids.slice() };
+  }
   let overlay = document.getElementById('reorderOverlay');
   if(!overlay){
     overlay = document.createElement('div');
@@ -714,7 +772,7 @@ function openReorderPanel(){
     overlay.innerHTML = '<div id="reorderHeader"><div id="reorderTitle"></div>'
       + '<div class="btnGroup"><button class="btn small" id="reorderCancelBtn">キャンセル</button>'
       + '<button class="btn primary" id="reorderDoneBtn">完了</button></div></div>'
-      + '<div id="reorderHint">左の「≡」を押さえたままドラッグして並べ替えます。「完了」を押すまで確定されません。</div>'
+      + '<div id="reorderHint"></div>'
       + '<div id="reorderList"></div>';
     document.body.appendChild(overlay);
     document.getElementById('reorderDoneBtn').addEventListener('click', finishReorder);
@@ -729,8 +787,8 @@ function openReorderPanel(){
       if(e.target.closest('.reorderHandle')) e.preventDefault();
     });
   }
-  document.getElementById('reorderTitle').textContent =
-    '並べ替え — '+tabDisplayName(currentTab)+' ('+list.length+')';
+  document.getElementById('reorderTitle').textContent = title;
+  document.getElementById('reorderHint').textContent = hint;
   document.getElementById('reorderList').scrollTop = 0;
   renderReorderList(null);
   overlay.classList.add('active');
@@ -753,6 +811,17 @@ async function finishReorder(){
   if(!reorderState) return;
   if(reorderDrag) endReorderDrag(false);
   const st = reorderState;
+  if(st.kind==='tabs'){
+    if(reorderIsChanged()){
+      if(!saveTabOrder(st.workIds)){
+        alert('タブの並び順を保存できませんでした(ブラウザの保存領域が使えない設定の可能性があります)。');
+        return;
+      }
+    }
+    closeReorderPanel();
+    render();
+    return;
+  }
   if(reorderIsChanged()){
     const assign = computeReorderAssignments(sessionsForTab(st.tab), st.workIds, sessions);
     if(!assign){
@@ -954,6 +1023,92 @@ function autoGrowMemoBox(el){
 }
 // キー入力ごとに再描画すると入力中にフォーカスが外れてしまうため、再描画はせず
 // メモリ上のsessionsとIndexedDBだけを更新する(デバウンス)。
+/* ---------- YouTubeリンク(v24) ----------
+   セッションごとにYouTubeのURLを保存し、有効なリンクなら「画像」見出し行の空きセルに
+   再生ボタンを出す。ボタンをタップするとYouTubeアプリで開く(Androidではintent URLで
+   YouTubeアプリを指定し、アプリが無ければブラウザで開く。それ以外の環境では新しいタブ)。
+   入力文字列は利用者が貼ったままをyoutubeUrlに保存し、有効かどうかは表示のたびに判定する
+   (間違って貼っても、直せるように)。http(s)かつYouTube系のホストだけを受け付け、
+   それ以外(javascript:等)はボタンを出さない。 */
+const YT_HOSTS = ['youtube.com','www.youtube.com','m.youtube.com','music.youtube.com','youtu.be','www.youtu.be'];
+// 戻り値: 有効なら正規化したhttps URL文字列、無効・空ならnull。
+function parseYoutubeUrl(str){
+  let t = String(str==null?'':str).trim();
+  if(!t) return null;
+  if(!/^[a-z][a-z0-9+.\-]*:/i.test(t)){
+    // スキームなし(例: youtu.be/xxxx)は、YouTube系のホストで始まる場合だけhttps://を補う
+    if(/^(www\.|m\.|music\.)?(youtube\.com|youtu\.be)(\/|$)/i.test(t)) t = 'https://'+t;
+    else return null;
+  }
+  let u;
+  try{ u = new URL(t); }catch(e){ return null; }
+  if(u.protocol!=='https:' && u.protocol!=='http:') return null;
+  if(!YT_HOSTS.includes(u.hostname.toLowerCase())) return null;
+  const host = u.hostname.toLowerCase();
+  const path = u.pathname || '/';
+  if(host==='youtu.be' || host==='www.youtu.be'){
+    if(path.length<=1) return null;
+  }else{
+    const okWatch = path==='/watch' && !!u.searchParams.get('v');
+    const okPath = /^\/(shorts|live|embed|v)\/[^\/]+/.test(path);
+    const okList = path==='/playlist' && !!u.searchParams.get('list');
+    if(!(okWatch || okPath || okList)) return null;
+  }
+  u.protocol = 'https:';
+  u.hash = '';
+  return u.href;
+}
+function youtubeButtonHtml(s){
+  if(!parseYoutubeUrl(s.youtubeUrl)) return '';
+  return '<button class="ytBtn" title="YouTubeで動画を開く" onclick="playYoutube(\''+escapeHtml(s.id)+'\')">'
+    + '<span class="tri">▶</span>YouTube</button>';
+}
+// 起動に使うURLを作る。Androidはintent://でYouTubeアプリを指定(アプリが無ければfallbackでhttps)。
+function buildYoutubeLaunchUrl(httpsUrl, isAndroid){
+  if(!isAndroid) return httpsUrl;
+  return 'intent://'+httpsUrl.slice('https://'.length)
+    + '#Intent;scheme=https;package=com.google.android.youtube;S.browser_fallback_url='
+    + encodeURIComponent(httpsUrl)+';end';
+}
+function playYoutube(sessionId){
+  const s = sessions.find(x=>x.id===sessionId);
+  if(!s) return;
+  const url = parseYoutubeUrl(s.youtubeUrl);
+  if(!url) return;
+  const isAndroid = /Android/i.test(navigator.userAgent||'');
+  const launch = buildYoutubeLaunchUrl(url, isAndroid);
+  if(isAndroid) window.location.href = launch;
+  else window.open(launch, '_blank', 'noopener');
+}
+// 入力のたびに表全体を描き直すと入力中のフォーカスが外れるため、該当列のボタンと警告表示だけを更新する。
+function refreshYoutubeCell(sessionId){
+  const s = sessions.find(x=>x.id===sessionId);
+  if(!s) return;
+  document.querySelectorAll('[data-ytcell]').forEach(td=>{
+    if(td.getAttribute('data-ytcell')===sessionId) td.innerHTML = youtubeButtonHtml(s);
+  });
+  document.querySelectorAll('[data-ytinput]').forEach(td=>{
+    if(td.getAttribute('data-ytinput')!==sessionId) return;
+    const raw = String(s.youtubeUrl||'').trim();
+    const bad = raw!=='' && !parseYoutubeUrl(raw);
+    const inp = td.querySelector('input'); const warn = td.querySelector('.ytWarn');
+    if(inp) inp.classList.toggle('bad', bad);
+    if(warn) warn.textContent = bad ? 'YouTubeのURLではありません' : '';
+  });
+}
+const ytSaveTimers = new Map();
+function updateYoutubeUrl(sessionId, text){
+  const s = sessions.find(x=>x.id===sessionId);
+  if(!s) return;
+  s.youtubeUrl = String(text==null?'':text).trim();
+  refreshYoutubeCell(sessionId);
+  clearTimeout(ytSaveTimers.get(sessionId));
+  ytSaveTimers.set(sessionId, setTimeout(()=>{
+    const cur = sessions.find(x=>x.id===sessionId);
+    if(cur) dbPut(cur);
+  }, 400));
+}
+
 const memoSaveTimers = new Map();
 function updateMemo(sessionId, text){
   const s = sessions.find(x=>x.id===sessionId);
@@ -971,14 +1126,12 @@ function updateMemo(sessionId, text){
    上書きされる形になるため、同じバックアップを読み込んでも重複しない)。 */
 async function exportAllSessions(){
   const all = await dbGetAll();
-  const payload = { app: 'DIVE EXPLORER', schemaVersion: 1, exportedAt: new Date().toISOString(), sessions: all };
+  const payload = { app: 'DIVE EXPLORER', schemaVersion: 1, exportedAt: new Date().toISOString(), tabOrder: loadTabOrder(), sessions: all };
   const blob = new Blob([JSON.stringify(payload)], {type:'application/json'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  const d = new Date();
-  const stamp = d.getFullYear()+(d.getMonth()+1).toString().padStart(2,'0')+d.getDate().toString().padStart(2,'0');
   a.href = url;
-  a.download = 'dive-explorer-backup-'+stamp+'.json';
+  a.download = 'de-backup-'+dateStamp8()+'.json';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -1007,6 +1160,10 @@ async function importAllSessions(file){
       maxOrder += 1;
       s.order = maxOrder;
       await dbPut(s);
+    }
+    // v24: バックアップに泳者タブの並び順が含まれていれば、それも復元する。
+    if(payload && !Array.isArray(payload) && Array.isArray(payload.tabOrder) && payload.tabOrder.length){
+      saveTabOrder(payload.tabOrder.filter(x=>typeof x==='string'));
     }
     await reloadSessions();
     render();
@@ -1181,7 +1338,6 @@ function renderTable(){
       currentTab!==s.primarySwimmer && (s.referencedSwimmers||[]).includes(currentTab);
     html += '<th><div class="colHead">'
       + '<div class="fname" title="タップで生データ表示" onclick="showRawPayload(\''+s.id+'\')" style="cursor:pointer;text-decoration:underline;">'+escapeHtml(s.sourceFileName)+'</div>'
-      + '<div class="impDate">取込: '+fmtDateTime(s.importedAt)+'</div>'
       + '<div class="swimmerRow"><span>泳者</span>'
       + '<input type="text" value="'+escapeHtml(s.primarySwimmer||'')+'" placeholder="(未分類)" '
       + 'onchange="renamePrimarySwimmer(\''+s.id+'\', this.value)"></div>'
@@ -1214,7 +1370,7 @@ function renderTable(){
   html += '</tr>';
 
   // 画像(軌道画像・ブロック期3画像)
-  html += '<tr class="sectionRow"><td>画像</td>' + list.map(()=>'<td></td>').join('') + '</tr>';
+  html += '<tr class="sectionRow"><td>画像</td>' + list.map(s=>'<td class="ytCell" data-ytcell="'+escapeHtml(s.id)+'">'+youtubeButtonHtml(s)+'</td>').join('') + '</tr>';
   html += '<tr><td>軌道画像</td>';
   list.forEach(s=>{
     const url = s.daPayload.trajectoryImageDataUrl;
@@ -1248,8 +1404,20 @@ function renderTable(){
     html += '</tr>';
   });
 
+  // v24: 一番下にYouTubeリンクの入力欄。有効なリンクが入ると、上の「画像」行に再生ボタンが出る。
+  html += '<tr class="sectionRow"><td>動画リンク</td>' + list.map(()=>'<td></td>').join('') + '</tr>';
+  html += '<tr><td>YouTube</td>';
+  list.forEach(s=>{
+    html += '<td class="ytInputCell" data-ytinput="'+escapeHtml(s.id)+'">'
+      + '<input type="text" inputmode="url" autocomplete="off" placeholder="URLを貼り付け" value="'+escapeHtml(s.youtubeUrl||'')+'" '
+      + 'oninput="updateYoutubeUrl(\''+escapeHtml(s.id)+'\', this.value)">'
+      + '<div class="ytWarn"></div></td>';
+  });
+  html += '</tr>';
+
   html += '</tbody></table>';
   wrap.innerHTML = html;
+  list.forEach(s=>refreshYoutubeCell(s.id));
   // v15: 既に入力済みのメモがある場合、最初から内容に応じた高さで表示する
   // (クリックして初めて正しい高さになる、という状態を避ける)。
   wrap.querySelectorAll('textarea.memoBox').forEach(autoGrowMemoBox);
@@ -1260,6 +1428,8 @@ function render(){
   renderTable();
   // v22: 並べ替えは2件以上あるタブでだけ意味があるので、それ未満なら押せないようにする。
   document.getElementById('reorderBtn').disabled = sessionsForTab(currentTab).length < 2;
+  // v24: 泳者タブが2つ以上あるときだけ、タブの並べ替えを押せるようにする。
+  document.getElementById('tabReorderBtn').disabled = getSwimmerNames().length < 2;
 }
 
 /* ---------- 数値データエクスポート(v23) ----------
@@ -1270,7 +1440,7 @@ function render(){
    DAのJSON(daPayload)から画像データ(data:image/...)だけを除いたもの。除いた項目のパスは
    各セッションのremovedImagePathsに記録する。
    選択は「書き出す」を押した時に初めて確定する(全データは範囲を選んだ時点で書き出す)。 */
-const DE_VERSION = 'v23';
+const DE_VERSION = 'v24';
 var nxState = null;   // {step:'scope'|'swimmers'|'pick', keys:Set(泳者キー), ids:Set(セッションid)}
 
 function nxKeyOf(s){ return s.primarySwimmer || UNCLASSIFIED_TAB; }
@@ -1319,10 +1489,11 @@ function nxBuildRecord(s){
   const payload = nxStripImages(s.daPayload, '', removed);
   return Object.assign({}, s, {daPayload: payload, removedImagePaths: removed});
 }
-function nxStamp(){
+// v24: 書き出しファイル名用の日付(yyyymmdd)。バックアップ・数値データエクスポート共通。
+function dateStamp8(){
   const d = new Date();
   const p = n=>String(n).padStart(2,'0');
-  return d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+'-'+p(d.getHours())+p(d.getMinutes());
+  return d.getFullYear()+p(d.getMonth()+1)+p(d.getDate());
 }
 // scope: 'all' | 'swimmers' | 'selected'。戻り値: {count, fileName}
 function nxExport(scope, list, swimmerLabels){
@@ -1339,7 +1510,7 @@ function nxExport(scope, list, swimmerLabels){
     sessions: recs
   };
   if(swimmerLabels) out.swimmers = swimmerLabels;
-  const fileName = 'dive-explorer-numeric-'+scope+'-'+nxStamp()+'.json';
+  const fileName = 'de-numero-'+dateStamp8()+'.json';
   const blob = new Blob([JSON.stringify(out, null, 2)], {type:'application/json'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -1585,7 +1756,8 @@ document.getElementById('backupImportBox').addEventListener('change', (e)=>{
 });
 document.getElementById('deleteAllBtn').addEventListener('click', deleteAllSessions);
 document.getElementById('numExpBtn').addEventListener('click', openNumExport);
-document.getElementById('reorderBtn').addEventListener('click', openReorderPanel);
+document.getElementById('reorderBtn').addEventListener('click', ()=>openReorderPanel('sessions'));
+document.getElementById('tabReorderBtn').addEventListener('click', ()=>openReorderPanel('tabs'));
 
 document.getElementById('tableWrap').addEventListener('click', (e)=>{
   const icon = e.target.closest('.infoIcon');
