@@ -464,6 +464,10 @@ async function handleFiles(fileList){
 // しないため、DA側で項目を追加するたびに手動でここに追記する必要がある。
 const LABEL_TO_METRIC_KEY = {
   '離台時の水平速度': 'Vh',
+  // v26: DA v127で説明文を新設した「離台時の落下速度」(fallSpeed)。DA v126以前の書き出しhtmlには
+  // metricInfo.fallSpeedが無いので、表示中のセッションがそれだけの場合は説明アイコンは出ない。
+  // v127以降のセッションが1つでもあれば、そのセッションの説明が使われる(findMetricInfoForLabel)。
+  '離台時の落下速度': 'fallSpeed',
   '離台時の飛び出し角度': 'launchAngle',
   '離台時の重心の高さ': 'h0',
   '滞空時間(離台〜重心着水)': 'flightTime',
@@ -1428,7 +1432,7 @@ function render(){
    DAのJSON(daPayload)から画像データ(data:image/...)だけを除いたもの。除いた項目のパスは
    各セッションのremovedImagePathsに記録する。
    選択は「書き出す」を押した時に初めて確定する(全データは範囲を選んだ時点で書き出す)。 */
-const DE_VERSION = 'v25';
+const DE_VERSION = 'v26a';
 var nxState = null;   // {step:'scope'|'swimmers'|'pick', keys:Set(泳者キー), ids:Set(セッションid)}
 
 function nxKeyOf(s){ return s.primarySwimmer || UNCLASSIFIED_TAB; }
