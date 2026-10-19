@@ -572,7 +572,12 @@ function closeImageViewer(){
 // 結果は同じで、影響はない)。
 // さらに、この行のラベル自体もDE表示用に短く言い換える(LABEL_OVERRIDES)。
 const LABEL_OVERRIDES = {
-  '(内訳: 離台時重心-台端距離)': '離台時重心-台端距離'
+  '(内訳: 離台時重心-台端距離)': '離台時重心-台端距離',
+  // v27: DA v138dでの表記変更。旧表記(DA v138cまで)と新表記が混在しても、同じ行に表示する。
+  // 表示される値は変わっておらず、名前だけが変わった(旧「ブロックタイム(始動前〜離台)」=新「リアクションタイム」、
+  // 旧「動き出し直前〜離台」=新「ブロックタイム(動き出し〜離台)」)。
+  'ブロックタイム(始動前〜離台)': 'リアクションタイム',
+  '動き出し直前〜離台': 'ブロックタイム(動き出し〜離台)'
 };
 function parseCopyLines(payload){
   const lines = (payload && payload.resultCopyLines) || [];
@@ -1379,7 +1384,7 @@ function renderTable(){
   // 指標本体(ブロック期詳細分析の区切りは、DA側のラベルパターンで判定)
   html += '<tr class="sectionRow"><td>分析結果</td>' + list.map(()=>'<td></td>').join('') + '</tr>';
   labelOrder.forEach(label=>{
-    const isBlockSection = (label==='ブロックタイム(始動前〜離台)');
+    const isBlockSection = (label==='リアクションタイム'); // v27: 旧ラベルはparseCopyLinesで統一済み
     if(isBlockSection){
       html += '<tr class="sectionRow"><td>ブロック期詳細分析</td>' + list.map(()=>'<td></td>').join('') + '</tr>';
     }
@@ -1432,7 +1437,7 @@ function render(){
    DAのJSON(daPayload)から画像データ(data:image/...)だけを除いたもの。除いた項目のパスは
    各セッションのremovedImagePathsに記録する。
    選択は「書き出す」を押した時に初めて確定する(全データは範囲を選んだ時点で書き出す)。 */
-const DE_VERSION = 'v26a';
+const DE_VERSION = 'v27';
 var nxState = null;   // {step:'scope'|'swimmers'|'pick', keys:Set(泳者キー), ids:Set(セッションid)}
 
 function nxKeyOf(s){ return s.primarySwimmer || UNCLASSIFIED_TAB; }
