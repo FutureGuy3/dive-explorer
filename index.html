@@ -472,7 +472,34 @@ const LABEL_TO_METRIC_KEY = {
   '離台時の重心の高さ': 'h0',
   '滞空時間(離台〜重心着水)': 'flightTime',
   '指先着水時の重心ベクトル角': 'fingerVectorAngle',
-  '指先着水時の姿勢角(指先-重心)': 'fingerEntryAngle',
+  // v28: DA v138m までの結果ページ指標の表記変更・説明追加に追随(新ラベル→METRIC_INFOキー)。
+  '指先着水時の姿勢角(重心-指先)': 'fingerEntryAngle',
+  'リアクションタイム': 'reactionTime',
+  'ブロックタイム(動き出し〜離台)': 'blockTime',
+  '運動エネルギー(重心着水時)': 'kineticEnergy',
+  '運動エネルギー(離台時)': 'kineticEnergy',
+  '前脚膝角度(始動前)': 'jointAngle',
+  '前脚膝角度(後ろ脛最大傾斜時)': 'jointAngle',
+  '前脚膝角度(後ろ脚完全伸展時)': 'jointAngle',
+  '後ろ脚膝角度(後ろ脛最大傾斜時)': 'jointAngle',
+  '後ろ脚足首角度(始動前)': 'ankleAngle',
+  '後ろ脚脛傾斜(始動前)': 'shinTilt',
+  '後ろ脚脛傾斜(後ろ脛最大傾斜時)': 'shinTilt',
+  '前脚脛傾斜(後ろ脚完全伸展時)': 'shinTilt',
+  '後ろ脚伸展角度(後ろ脚完全伸展時)': 'backLegExt',
+  '前脚伸展角度(離台時)': 'frontLegExt',
+  '離台時の前脚伸展角度': 'frontLegExt',
+  '離台時合成速度': 'departureSpeed',
+  '離台時の姿勢角(重心-頭頂)': 'postureDeparture',
+  '指先着水時の姿勢角(重心-頭頂)': 'postureFingerHead',
+  '頭頂着水時の姿勢角(重心-頭頂)': 'postureHeadEntry',
+  '頭頂着水時の重心ベクトル角': 'headVectorAngle',
+  '後ろ脛最大傾斜-後ろ脚完全伸展 平均水平速度': 'segShinExt',
+  '後ろ脛最大傾斜-後ろ脚完全伸展 平均落下速度': 'segShinExt',
+  '後ろ脛最大傾斜-後ろ脚完全伸展 平均移動角度': 'segShinExt',
+  '後ろ脚完全伸展-離台時 平均水平速度': 'segExtDep',
+  '後ろ脚完全伸展-離台時 平均落下速度': 'segExtDep',
+  '後ろ脚完全伸展-離台時 平均移動角度': 'segExtDep',
   '重心入水角度': 'entryAngle',
   '重心入水時合成速度': 'comEntrySpeed',
   '入水孔直径(指先-つま先)': 'entryHoleDiameter',
@@ -577,7 +604,20 @@ const LABEL_OVERRIDES = {
   // 表示される値は変わっておらず、名前だけが変わった(旧「ブロックタイム(始動前〜離台)」=新「リアクションタイム」、
   // 旧「動き出し直前〜離台」=新「ブロックタイム(動き出し〜離台)」)。
   'ブロックタイム(始動前〜離台)': 'リアクションタイム',
-  '動き出し直前〜離台': 'ブロックタイム(動き出し〜離台)'
+  '動き出し直前〜離台': 'ブロックタイム(動き出し〜離台)',
+  // v28: DA v138hまでの旧表記→新表記(同じ行に表示する)。
+  '指先着水時の姿勢角(指先-重心)': '指先着水時の姿勢角(重心-指先)',
+  '指先着水時の姿勢角(頭頂-重心)': '指先着水時の姿勢角(重心-頭頂)',
+  '頭頂着水時の姿勢角(頭頂-重心)': '頭頂着水時の姿勢角(重心-頭頂)',
+  '始動前-後ろ脛最大傾斜 水平速度': '始動前-後ろ脛最大傾斜 平均水平速度',
+  '始動前-後ろ脛最大傾斜 落下速度': '始動前-後ろ脛最大傾斜 平均落下速度',
+  '始動前-後ろ脛最大傾斜 移動角度': '始動前-後ろ脛最大傾斜 平均移動角度',
+  '後ろ脛最大傾斜-後ろ脚完全伸展 水平速度': '後ろ脛最大傾斜-後ろ脚完全伸展 平均水平速度',
+  '後ろ脛最大傾斜-後ろ脚完全伸展 落下速度': '後ろ脛最大傾斜-後ろ脚完全伸展 平均落下速度',
+  '後ろ脛最大傾斜-後ろ脚完全伸展 移動角度': '後ろ脛最大傾斜-後ろ脚完全伸展 平均移動角度',
+  '後ろ脚完全伸展-離台時 水平速度': '後ろ脚完全伸展-離台時 平均水平速度',
+  '後ろ脚完全伸展-離台時 落下速度': '後ろ脚完全伸展-離台時 平均落下速度',
+  '後ろ脚完全伸展-離台時 移動角度': '後ろ脚完全伸展-離台時 平均移動角度'
 };
 function parseCopyLines(payload){
   const lines = (payload && payload.resultCopyLines) || [];
@@ -1197,7 +1237,7 @@ function escapeHtml(s){
 // 広がってしまう。この形式(X m/s (Y km/h))の値だけは、m/sの後で改行して2行表示にする。
 // v7: labelを追加で受け取り、色分け対象の3指標はcolorizeCompareValueに委ねる。
 function formatValueHtml(value, label){
-  if(label==='指先着水時の重心ベクトル角' || label==='重心入水角度' || label==='指先着水時の姿勢角(指先-重心)'){
+  if(label==='指先着水時の重心ベクトル角' || label==='重心入水角度' || label==='指先着水時の姿勢角(重心-指先)'){
     return colorizeCompareValue(label, value);
   }
   const m = /^(.+ m\/s) \((.+ km\/h)\)$/.exec(value||'');
@@ -1222,7 +1262,7 @@ function metricColorClassDE(kind, rawValue){
   return '';
 }
 // resultCopyLinesのラベルごとに、値文字列(例:"33.4°"、"12.3°(迎角 -4.1°)")から
-// 該当する数値を取り出して色分けする。「指先着水時の姿勢角(指先-重心)」だけは、
+// 該当する数値を取り出して色分けする。「指先着水時の姿勢角(重心-指先)」だけは、
 // 先頭の姿勢角ではなく、括弧内の「迎角」の数値部分だけを色付けする(DA側の表示と揃える)。
 function colorizeCompareValue(label, rawValueStr){
   if(rawValueStr==null || rawValueStr==='') return escapeHtml(rawValueStr);
@@ -1233,7 +1273,7 @@ function colorizeCompareValue(label, rawValueStr){
     const escaped = escapeHtml(rawValueStr);
     return cls ? '<span class="'+cls+'">'+escaped+'</span>' : escaped;
   }
-  if(label==='指先着水時の姿勢角(指先-重心)'){
+  if(label==='指先着水時の姿勢角(重心-指先)'){
     const m = /^(.*迎角\s*)(-?\d+(?:\.\d+)?)(°)(.*)$/.exec(rawValueStr);
     if(m){
       const num = parseFloat(m[2]);
@@ -1437,7 +1477,7 @@ function render(){
    DAのJSON(daPayload)から画像データ(data:image/...)だけを除いたもの。除いた項目のパスは
    各セッションのremovedImagePathsに記録する。
    選択は「書き出す」を押した時に初めて確定する(全データは範囲を選んだ時点で書き出す)。 */
-const DE_VERSION = 'v27';
+const DE_VERSION = 'v28';
 var nxState = null;   // {step:'scope'|'swimmers'|'pick', keys:Set(泳者キー), ids:Set(セッションid)}
 
 function nxKeyOf(s){ return s.primarySwimmer || UNCLASSIFIED_TAB; }
