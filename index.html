@@ -1161,18 +1161,61 @@ function updateMemo(sessionId, text){
    前のバージョンで登録したセッションが見えなくなる可能性がある。それに備えて、全セッションを
    1つのJSONファイルに書き出し/読み込みできるようにしておく(同じidのセッションは
    上書きされる形になるため、同じバックアップを読み込んでも重複しない)。 */
+/* v29: 全件を一度にメモリへ読み込み、巨大な1つの文字列にしてから保存していたため、件数が多いと
+   「Out of Memory」でページが落ちていた。セッションを1件ずつDBから読み、1件ずつ文字列化して
+   Blobの部品として積み上げる方式に変更した(出力ファイルの形式は従来と同じ)。 */
+async function dbGetAllKeys(){
+  const db = await openDB();
+  return new Promise((resolve, reject)=>{
+    const tx = db.transaction(STORE, 'readonly');
+    const req = tx.objectStore(STORE).getAllKeys();
+    req.onsuccess = ()=>resolve(req.result);
+    req.onerror = ()=>reject(req.error);
+  });
+}
+async function dbGetOne(key){
+  const db = await openDB();
+  return new Promise((resolve, reject)=>{
+    const tx = db.transaction(STORE, 'readonly');
+    const req = tx.objectStore(STORE).get(key);
+    req.onsuccess = ()=>resolve(req.result);
+    req.onerror = ()=>reject(req.error);
+  });
+}
 async function exportAllSessions(){
-  const all = await dbGetAll();
-  const payload = { app: 'DIVE EXPLORER', schemaVersion: 1, exportedAt: new Date().toISOString(), tabOrder: loadTabOrder(), sessions: all };
-  const blob = new Blob([JSON.stringify(payload)], {type:'application/json'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'de-backup-'+dateStamp8()+'.json';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(()=>URL.revokeObjectURL(url), 2000);
+  const btn = document.getElementById('backupExportBtn');
+  const label = btn ? btn.textContent : '';
+  try{
+    const keys = await dbGetAllKeys();
+    const parts = [];
+    parts.push('{"app":"DIVE EXPLORER","schemaVersion":1,"exportedAt":'+JSON.stringify(new Date().toISOString())
+      +',"tabOrder":'+JSON.stringify(loadTabOrder())+',"sessions":[');
+    let n = 0;
+    for(let k=0; k<keys.length; k++){
+      if(btn) btn.textContent = '書き出し中 '+(k+1)+'/'+keys.length;
+      const rec = await dbGetOne(keys[k]);
+      if(rec===undefined) continue;
+      parts.push((n>0?',':'')+JSON.stringify(rec));
+      n++;
+      // 描画を挟んで、メモリ解放とUI更新の機会を作る
+      await new Promise(r=>setTimeout(r,0));
+    }
+    parts.push(']}');
+    const blob = new Blob(parts, {type:'application/json'});
+    parts.length = 0;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'de-backup-'+dateStamp8()+'.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url), 120000);
+  }catch(e){
+    alert('バックアップの書き出しに失敗しました: '+(e && e.message ? e.message : e));
+  }finally{
+    if(btn) btn.textContent = label;
+  }
 }
 async function importAllSessions(file){
   try{
@@ -1477,7 +1520,7 @@ function render(){
    DAのJSON(daPayload)から画像データ(data:image/...)だけを除いたもの。除いた項目のパスは
    各セッションのremovedImagePathsに記録する。
    選択は「書き出す」を押した時に初めて確定する(全データは範囲を選んだ時点で書き出す)。 */
-const DE_VERSION = 'v28';
+const DE_VERSION = 'v29';
 var nxState = null;   // {step:'scope'|'swimmers'|'pick', keys:Set(泳者キー), ids:Set(セッションid)}
 
 function nxKeyOf(s){ return s.primarySwimmer || UNCLASSIFIED_TAB; }
