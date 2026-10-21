@@ -162,6 +162,12 @@
   }
   #imageViewerOverlay.active{display:flex;}
   #imageViewerOverlay img{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px;}
+  /* v30: スワイプ・矢印キーで画像を切り替えられるよう、ビューア上ではブラウザ標準のスクロール・拡大を無効にする。 */
+  #imageViewerOverlay{touch-action:none;}
+  #imageViewerCaption{
+    position:fixed;left:0;right:0;bottom:12px;text-align:center;z-index:111;
+    font-size:12px;color:#ddd;pointer-events:none;text-shadow:0 0 4px #000;
+  }
   #imageViewerCloseBtn{
     position:fixed;top:14px;right:16px;z-index:111;
     background:rgba(20,20,20,0.75);border:1px solid var(--line);color:var(--text);
@@ -568,25 +574,101 @@ function closeMetricInfoModal(){
 // v21: PCブラウザではピンチイン拡大ができないため、タップで全画面ポップアップ表示する。
 // クリックされた<img>自身のsrc(this.src)を読むだけなので、既に長いdata URLをHTML内に
 // 二重に埋め込む必要がない。
-function openImageViewer(url){
-  if(!url) return;
+// v30: 画像を開いたあと、スワイプ・矢印キーで切り替えられる。
+//  上下: 軌道画像 ⇔ ブロック期3画像(スマホは引き上げ=ブロック期、引き下げ=軌道 / PCは↓=ブロック期、↑=軌道)
+//  左右: 前の列・次の列の同じ種類の画像(画像がない列は飛ばす。端では止まる)
+var viewerSessionIds = [];
+var viewerState = null; // {id, kind}
+function viewerImageUrl(id, kind){
+  const s = sessions.find(x=>x.id===id);
+  if(!s || !s.daPayload) return null;
+  return kind==='block' ? s.daPayload.blockPhaseImageDataUrl : s.daPayload.trajectoryImageDataUrl;
+}
+function ensureImageViewer(){
   let overlay = document.getElementById('imageViewerOverlay');
   if(!overlay){
     overlay = document.createElement('div');
     overlay.id = 'imageViewerOverlay';
     overlay.innerHTML = '<button id="imageViewerCloseBtn" onclick="closeImageViewer()">✕</button>'
-      + '<img id="imageViewerImg" src="">';
+      + '<img id="imageViewerImg" src="">'
+      + '<div id="imageViewerCaption"></div>';
     // 画像自体ではなく、背景部分がタップされたときも閉じられるようにする。
     overlay.onclick = (e)=>{ if(e.target===overlay) closeImageViewer(); };
+    // スワイプ(1本指のみ。2本指は無視)
+    let sx=0, sy=0, tracking=false;
+    overlay.addEventListener('touchstart', (e)=>{
+      if(e.touches.length!==1){ tracking=false; return; }
+      tracking=true; sx=e.touches[0].clientX; sy=e.touches[0].clientY;
+    }, {passive:true});
+    overlay.addEventListener('touchend', (e)=>{
+      if(!tracking) return;
+      tracking=false;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - sx, dy = t.clientY - sy;
+      const ax = Math.abs(dx), ay = Math.abs(dy);
+      if(Math.max(ax, ay) < 50) return; // タップ扱い(閉じる操作は従来のまま)
+      if(ay > ax){
+        viewerMoveKind(dy < 0 ? 'block' : 'traj'); // 引き上げ→ブロック期 / 引き下げ→軌道
+      }else{
+        viewerMoveColumn(dx < 0 ? 1 : -1); // 左スワイプ→次の列 / 右スワイプ→前の列
+      }
+    }, {passive:true});
     document.body.appendChild(overlay);
   }
+  return overlay;
+}
+function viewerShow(){
+  if(!viewerState) return;
+  const url = viewerImageUrl(viewerState.id, viewerState.kind);
+  if(!url) return;
   document.getElementById('imageViewerImg').src = url;
+  const idx = viewerSessionIds.indexOf(viewerState.id);
+  document.getElementById('imageViewerCaption').textContent =
+    (viewerState.kind==='block' ? 'ブロック期3画像' : '軌道画像')
+    + (idx>=0 ? '  ('+(idx+1)+'/'+viewerSessionIds.length+'列目)' : '');
+}
+function openImageViewerAt(id, kind){
+  if(!viewerImageUrl(id, kind)) return;
+  const overlay = ensureImageViewer();
+  viewerState = {id:id, kind:kind};
+  viewerShow();
   overlay.classList.add('active');
+}
+function viewerMoveKind(kind){
+  if(!viewerState || viewerState.kind===kind) return;
+  if(!viewerImageUrl(viewerState.id, kind)) return; // この列にもう一方の画像がなければ動かない
+  viewerState.kind = kind;
+  viewerShow();
+}
+function viewerMoveColumn(step){
+  if(!viewerState) return;
+  let i = viewerSessionIds.indexOf(viewerState.id);
+  if(i<0) return;
+  for(i += step; i>=0 && i<viewerSessionIds.length; i += step){
+    if(viewerImageUrl(viewerSessionIds[i], viewerState.kind)){
+      viewerState.id = viewerSessionIds[i];
+      viewerShow();
+      return;
+    }
+  }
+  // 端に達したら止まる(何もしない)
 }
 function closeImageViewer(){
   const overlay = document.getElementById('imageViewerOverlay');
   if(overlay) overlay.classList.remove('active');
+  viewerState = null;
 }
+document.addEventListener('keydown', (e)=>{
+  const overlay = document.getElementById('imageViewerOverlay');
+  if(!overlay || !overlay.classList.contains('active')) return;
+  if(e.key==='ArrowDown'){ viewerMoveKind('block'); }
+  else if(e.key==='ArrowUp'){ viewerMoveKind('traj'); }
+  else if(e.key==='ArrowRight'){ viewerMoveColumn(1); }
+  else if(e.key==='ArrowLeft'){ viewerMoveColumn(-1); }
+  else if(e.key==='Escape'){ closeImageViewer(); return; }
+  else return;
+  e.preventDefault();
+});
 
 /* ---------- resultCopyLinesの解析 ---------- */
 // DA側のbuildResultCopyLines()が返す配列をそのまま埋め込んでいる。
@@ -1449,18 +1531,19 @@ function renderTable(){
   });
   html += '</tr>';
 
+  viewerSessionIds = list.map(s=>s.id); // v30: 画像ビューアで左右に移動する列の並び
   // 画像(軌道画像・ブロック期3画像)
   html += '<tr class="sectionRow"><td>画像</td>' + list.map(s=>'<td class="ytCell" data-ytcell="'+escapeHtml(s.id)+'">'+youtubeButtonHtml(s)+'</td>').join('') + '</tr>';
   html += '<tr><td>軌道画像</td>';
   list.forEach(s=>{
     const url = s.daPayload.trajectoryImageDataUrl;
-    html += '<td>'+(url ? '<img class="thumbImg" src="'+url+'" style="cursor:pointer" onclick="openImageViewer(this.src)">' : '-')+'</td>';
+    html += '<td>'+(url ? '<img class="thumbImg" src="'+url+'" style="cursor:pointer" onclick="openImageViewerAt(\''+s.id+'\',\'traj\')">' : '-')+'</td>';
   });
   html += '</tr>';
   html += '<tr><td>ブロック期3画像</td>';
   list.forEach(s=>{
     const url = s.daPayload.blockPhaseImageDataUrl;
-    html += '<td>'+(url ? '<img class="thumbImg" src="'+url+'" style="cursor:pointer" onclick="openImageViewer(this.src)">' : '(未実施)')+'</td>';
+    html += '<td>'+(url ? '<img class="thumbImg" src="'+url+'" style="cursor:pointer" onclick="openImageViewerAt(\''+s.id+'\',\'block\')">' : '(未実施)')+'</td>';
   });
   html += '</tr>';
 
@@ -1520,7 +1603,7 @@ function render(){
    DAのJSON(daPayload)から画像データ(data:image/...)だけを除いたもの。除いた項目のパスは
    各セッションのremovedImagePathsに記録する。
    選択は「書き出す」を押した時に初めて確定する(全データは範囲を選んだ時点で書き出す)。 */
-const DE_VERSION = 'v29';
+const DE_VERSION = 'v30';
 var nxState = null;   // {step:'scope'|'swimmers'|'pick', keys:Set(泳者キー), ids:Set(セッションid)}
 
 function nxKeyOf(s){ return s.primarySwimmer || UNCLASSIFIED_TAB; }
