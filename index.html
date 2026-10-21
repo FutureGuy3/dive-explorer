@@ -189,6 +189,14 @@
   #reorderTitle{font-size:14px;color:var(--accent2);font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   #reorderHeader .btnGroup{display:flex;gap:6px;flex:0 0 auto;}
   #reorderHint{font-size:11px;color:var(--sub);padding:6px 14px;background:var(--panel);border-bottom:1px solid var(--line);flex:0 0 auto;}
+  /* v31: 指標による並べ替え(基準の選択+昇順/降順)。 */
+  #reorderSortBar{
+    display:none;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 14px;
+    background:var(--panel);border-bottom:1px solid var(--line);flex:0 0 auto;font-size:11px;color:var(--sub);
+  }
+  #reorderSortBar.show{display:flex;}
+  #reorderSortSel{flex:1 1 140px;min-width:0;max-width:100%;font-size:12px;padding:4px 6px;
+    background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px;}
   #reorderList{
     flex:1;overflow-y:auto;padding:10px 10px 28px;position:relative;
     -webkit-user-select:none;user-select:none;overscroll-behavior:contain;
@@ -873,6 +881,8 @@ function renderReorderList(movedId){
       + reorderKvHtml('泳者メモ', info.swimmerMemo, true, false)
       + reorderKvHtml('水平速度', info.speed, false, true)
       + reorderKvHtml('メモ', info.memo, true, false)
+      + (reorderState.sortShown && reorderState.sortShown!==REORDER_SORT_DATE && reorderState.sortShown!=='離台時の水平速度'
+          ? reorderKvHtml(reorderState.sortShown, reorderSortRawValue(s, reorderState.sortShown), false, true) : '')
       + '</div></div>';
   });
   list.innerHTML = html;
@@ -905,10 +915,19 @@ function openReorderPanel(kind){
       + '<div class="btnGroup"><button class="btn small" id="reorderCancelBtn">キャンセル</button>'
       + '<button class="btn primary" id="reorderDoneBtn">完了</button></div></div>'
       + '<div id="reorderHint"></div>'
+      + '<div id="reorderSortBar"><span>基準</span><select id="reorderSortSel"></select>'
+      + '<button class="btn small" id="reorderSortAsc">▲昇順</button>'
+      + '<button class="btn small" id="reorderSortDesc">▼降順</button></div>'
       + '<div id="reorderList"></div>';
     document.body.appendChild(overlay);
     document.getElementById('reorderDoneBtn').addEventListener('click', finishReorder);
     document.getElementById('reorderCancelBtn').addEventListener('click', cancelReorder);
+    document.getElementById('reorderSortSel').addEventListener('change', (e)=>{
+      if(reorderState) reorderState.sortKey = e.target.value;
+      renderReorderList(null);
+    });
+    document.getElementById('reorderSortAsc').addEventListener('click', ()=>applyReorderSort(true));
+    document.getElementById('reorderSortDesc').addEventListener('click', ()=>applyReorderSort(false));
     const listEl = document.getElementById('reorderList');
     listEl.addEventListener('pointerdown', (e)=>{
       const h = e.target.closest('.reorderHandle');
@@ -921,9 +940,77 @@ function openReorderPanel(kind){
   }
   document.getElementById('reorderTitle').textContent = title;
   document.getElementById('reorderHint').textContent = hint;
+  setupReorderSortBar();
   document.getElementById('reorderList').scrollTop = 0;
   renderReorderList(null);
   overlay.classList.add('active');
+}
+/* v31: 指標・日付による並べ替え。値が取れないセッションは、昇順・降順どちらでも末尾にまとめる。
+   同値は、並べ替え前の順序を保つ(安定ソート)。 */
+const REORDER_SORT_DATE = '__date__';
+function parseDateValue(str){
+  // 'yyyy-mm-dd' / 'yyyy/m/d' / 'yy/m/d' など。数字3つを年・月・日として読む。
+  const m = String(str||'').match(/(\d+)\D+(\d+)\D+(\d+)/);
+  if(!m) return null;
+  let y = +m[1];
+  if(y < 100) y += 2000;
+  return y*10000 + (+m[2])*100 + (+m[3]);
+}
+function parseLeadingNumber(str){
+  const m = String(str||'').replace(/[\u2212\uFF0D]/g,'-').match(/-?\d+(?:\.\d+)?/);
+  return m ? parseFloat(m[0]) : null;
+}
+function reorderSortValue(s, key){
+  const p = parseCopyLines(s.daPayload);
+  if(key===REORDER_SORT_DATE) return parseDateValue(p.meta.shootDate);
+  for(const [label, value] of p.rows){
+    if(label===key) return parseLeadingNumber(value);
+  }
+  return null;
+}
+function reorderSortRawValue(s, key){
+  const p = parseCopyLines(s.daPayload);
+  if(key===REORDER_SORT_DATE) return p.meta.shootDate || '';
+  for(const [label, value] of p.rows){
+    if(label===key) return value;
+  }
+  return '';
+}
+function setupReorderSortBar(){
+  const bar = document.getElementById('reorderSortBar');
+  if(!bar) return;
+  if(!reorderState || reorderState.kind!=='sessions'){ bar.classList.remove('show'); return; }
+  const list = reorderState.baseIds.map(id=>sessions.find(s=>s.id===id)).filter(Boolean);
+  const labels = [];
+  const seen = new Set();
+  list.forEach(s=>{
+    parseCopyLines(s.daPayload).rows.forEach(([label, value])=>{
+      if(!seen.has(label) && parseLeadingNumber(value)!==null){ seen.add(label); labels.push(label); }
+    });
+  });
+  const sel = document.getElementById('reorderSortSel');
+  sel.innerHTML = '<option value="'+REORDER_SORT_DATE+'">撮影日</option>'
+    + labels.map(l=>'<option value="'+escapeHtml(l)+'">'+escapeHtml(l)+'</option>').join('');
+  reorderState.sortKey = REORDER_SORT_DATE;
+  sel.value = REORDER_SORT_DATE;
+  bar.classList.add('show');
+}
+function applyReorderSort(asc){
+  if(!reorderState || reorderState.kind!=='sessions') return;
+  const key = reorderState.sortKey || REORDER_SORT_DATE;
+  const byId = new Map(sessions.map(s=>[s.id, s]));
+  const items = reorderState.workIds.map((id, i)=>({id, i, v: byId.get(id) ? reorderSortValue(byId.get(id), key) : null}));
+  items.sort((a,b)=>{
+    const an = a.v===null, bn = b.v===null;
+    if(an || bn) return an===bn ? a.i-b.i : (an ? 1 : -1);
+    if(a.v===b.v) return a.i-b.i;
+    return asc ? a.v-b.v : b.v-a.v;
+  });
+  reorderState.workIds = items.map(x=>x.id);
+  reorderState.sortShown = key;
+  renderReorderList(null);
+  const list = document.getElementById('reorderList');
+  if(list) list.scrollTop = 0;
 }
 function closeReorderPanel(){
   const overlay = document.getElementById('reorderOverlay');
@@ -1603,7 +1690,7 @@ function render(){
    DAのJSON(daPayload)から画像データ(data:image/...)だけを除いたもの。除いた項目のパスは
    各セッションのremovedImagePathsに記録する。
    選択は「書き出す」を押した時に初めて確定する(全データは範囲を選んだ時点で書き出す)。 */
-const DE_VERSION = 'v30';
+const DE_VERSION = 'v31';
 var nxState = null;   // {step:'scope'|'swimmers'|'pick', keys:Set(泳者キー), ids:Set(セッションid)}
 
 function nxKeyOf(s){ return s.primarySwimmer || UNCLASSIFIED_TAB; }
