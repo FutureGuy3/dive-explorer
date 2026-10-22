@@ -191,12 +191,16 @@
   #reorderHint{font-size:11px;color:var(--sub);padding:6px 14px;background:var(--panel);border-bottom:1px solid var(--line);flex:0 0 auto;}
   /* v31: 指標による並べ替え(基準の選択+昇順/降順)。 */
   #reorderSortBar{
-    display:none;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 14px;
+    display:none;flex-direction:column;gap:5px;padding:6px 14px;
     background:var(--panel);border-bottom:1px solid var(--line);flex:0 0 auto;font-size:11px;color:var(--sub);
   }
   #reorderSortBar.show{display:flex;}
-  #reorderSortSel{flex:1 1 140px;min-width:0;max-width:100%;font-size:12px;padding:4px 6px;
+  .rsRow{display:flex;gap:6px;align-items:center;}
+  .rsRow .rsLbl{flex:0 0 34px;}
+  .rsRow select{min-width:0;font-size:12px;padding:4px 6px;
     background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px;}
+  .rsRow select.rsKey{flex:1 1 auto;}
+  .rsRow select.rsDir{flex:0 0 auto;}
   #reorderList{
     flex:1;overflow-y:auto;padding:10px 10px 28px;position:relative;
     -webkit-user-select:none;user-select:none;overscroll-behavior:contain;
@@ -255,6 +259,25 @@
   .nxChip.part{border-color:var(--accent2);color:var(--accent2);}
   .nxChip.on{background:var(--accent2);border-color:var(--accent2);color:#04211a;font-weight:700;}
   #nxList{flex:1;overflow-y:auto;padding:10px 10px 28px;overscroll-behavior:contain;}
+  /* v33: 選択削除パネル。数値データエクスポートと同じ行デザイン(.reorderRow/.nxRow/.nxCheck)を流用する。 */
+  #bulkDelOverlay{
+    display:none;position:fixed;inset:0;z-index:130;background:var(--bg);flex-direction:column;
+  }
+  #bulkDelOverlay.active{display:flex;}
+  #bdHeader{
+    display:flex;align-items:center;justify-content:space-between;gap:8px;
+    padding:10px 14px;background:var(--panel);border-bottom:1px solid var(--line);flex:0 0 auto;
+  }
+  #bdTitle{font-size:14px;color:var(--accent2);font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  #bdHeader .btnGroup{display:flex;gap:6px;flex:0 0 auto;}
+  #bdHint{font-size:11px;color:var(--sub);padding:6px 14px;background:var(--panel);border-bottom:1px solid var(--line);flex:0 0 auto;line-height:1.5;}
+  #bdTools{padding:8px 14px;background:var(--panel);border-bottom:1px solid var(--line);flex:0 0 auto;}
+  #bdTools .nxToolRow{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
+  #bdTools .nxCount{font-size:11px;color:var(--sub);margin-left:auto;font-family:var(--mono);}
+  #bdChips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;max-height:92px;overflow-y:auto;}
+  #bdChips:empty{display:none;}
+  #bdList{flex:1;overflow-y:auto;padding:10px 10px 28px;overscroll-behavior:contain;}
+  .bdRefTag{font-size:10px;color:var(--sub);border:1px solid var(--line);border-radius:4px;padding:0 4px;}
   .nxRow{cursor:pointer;-webkit-tap-highlight-color:transparent;}
   .nxRow.checked{border-color:var(--accent2);background:rgba(61,220,151,0.10);}
   .nxCheck{
@@ -312,6 +335,7 @@
     <button class="btn small" id="tabReorderBtn" disabled>泳者タブの並べ替え</button>
     <button class="btn small" id="backupExportBtn">バックアップを書き出す</button>
     <button class="btn small" id="backupImportBtn">バックアップを読み込む</button>
+    <button class="btn small warn" id="bulkDelBtn" disabled>選択削除</button>
     <button class="btn small warn" id="deleteAllBtn">全データを削除</button>
   </div>
 
@@ -881,8 +905,8 @@ function renderReorderList(movedId){
       + reorderKvHtml('泳者メモ', info.swimmerMemo, true, false)
       + reorderKvHtml('水平速度', info.speed, false, true)
       + reorderKvHtml('メモ', info.memo, true, false)
-      + (reorderState.sortShown && reorderState.sortShown!==REORDER_SORT_DATE && reorderState.sortShown!=='離台時の水平速度'
-          ? reorderKvHtml(reorderState.sortShown, reorderSortRawValue(s, reorderState.sortShown), false, true) : '')
+      + (reorderState.sortShown||[]).filter(k=>k!==REORDER_SORT_DATE && k!=='離台時の水平速度')
+          .map(k=>reorderKvHtml(k, reorderSortRawValue(s, k), false, true)).join('')
       + '</div></div>';
   });
   list.innerHTML = html;
@@ -915,19 +939,18 @@ function openReorderPanel(kind){
       + '<div class="btnGroup"><button class="btn small" id="reorderCancelBtn">キャンセル</button>'
       + '<button class="btn primary" id="reorderDoneBtn">完了</button></div></div>'
       + '<div id="reorderHint"></div>'
-      + '<div id="reorderSortBar"><span>基準</span><select id="reorderSortSel"></select>'
-      + '<button class="btn small" id="reorderSortAsc">▲昇順</button>'
-      + '<button class="btn small" id="reorderSortDesc">▼降順</button></div>'
+      + '<div id="reorderSortBar">'
+      + [1,2,3].map(n=>'<div class="rsRow"><span class="rsLbl">第'+n+'</span>'
+          + '<select class="rsKey" id="reorderSortKey'+n+'"></select>'
+          + '<select class="rsDir" id="reorderSortDir'+n+'"><option value="asc">昇順</option><option value="desc">降順</option></select></div>').join('')
+      + '<div class="rsRow"><button class="btn small primary" id="reorderSortRun">並べ替える</button>'
+      + '<span>基準と向きを選んで押すと、一覧が並び替わります(確定は「完了」)</span></div>'
+      + '<div id="reorderSortStatus" style="font-size:11px;color:var(--accent2);min-height:14px;"></div></div>'
       + '<div id="reorderList"></div>';
     document.body.appendChild(overlay);
     document.getElementById('reorderDoneBtn').addEventListener('click', finishReorder);
     document.getElementById('reorderCancelBtn').addEventListener('click', cancelReorder);
-    document.getElementById('reorderSortSel').addEventListener('change', (e)=>{
-      if(reorderState) reorderState.sortKey = e.target.value;
-      renderReorderList(null);
-    });
-    document.getElementById('reorderSortAsc').addEventListener('click', ()=>applyReorderSort(true));
-    document.getElementById('reorderSortDesc').addEventListener('click', ()=>applyReorderSort(false));
+    document.getElementById('reorderSortRun').addEventListener('click', applyReorderSort);
     const listEl = document.getElementById('reorderList');
     listEl.addEventListener('pointerdown', (e)=>{
       const h = e.target.closest('.reorderHandle');
@@ -948,6 +971,7 @@ function openReorderPanel(kind){
 /* v31: 指標・日付による並べ替え。値が取れないセッションは、昇順・降順どちらでも末尾にまとめる。
    同値は、並べ替え前の順序を保つ(安定ソート)。 */
 const REORDER_SORT_DATE = '__date__';
+const REORDER_SORT_STORE = 'de_reorder_sort_v1';
 function parseDateValue(str){
   // 'yyyy-mm-dd' / 'yyyy/m/d' / 'yy/m/d' など。数字3つを年・月・日として読む。
   const m = String(str||'').match(/(\d+)\D+(\d+)\D+(\d+)/);
@@ -988,26 +1012,76 @@ function setupReorderSortBar(){
       if(!seen.has(label) && parseLeadingNumber(value)!==null){ seen.add(label); labels.push(label); }
     });
   });
-  const sel = document.getElementById('reorderSortSel');
-  sel.innerHTML = '<option value="'+REORDER_SORT_DATE+'">撮影日</option>'
+  const opts = '<option value="'+REORDER_SORT_DATE+'">撮影日</option>'
     + labels.map(l=>'<option value="'+escapeHtml(l)+'">'+escapeHtml(l)+'</option>').join('');
-  reorderState.sortKey = REORDER_SORT_DATE;
-  sel.value = REORDER_SORT_DATE;
+  [1,2,3].forEach(n=>{
+    const sel = document.getElementById('reorderSortKey'+n);
+    sel.innerHTML = (n===1 ? '' : '<option value="">(なし)</option>') + opts;
+    sel.value = n===1 ? REORDER_SORT_DATE : '';
+    document.getElementById('reorderSortDir'+n).value = 'asc';
+  });
+  // v32a: 前回の設定を引き継ぐ(今の基準の一覧にない指標は、その段を初期値に戻す)
+  try{
+    const saved = JSON.parse(localStorage.getItem(REORDER_SORT_STORE) || 'null');
+    if(saved && Array.isArray(saved.keys)){
+      [1,2,3].forEach(n=>{
+        const k = saved.keys[n-1], d = (saved.dirs||[])[n-1];
+        const sel = document.getElementById('reorderSortKey'+n);
+        if(k!==undefined && [...sel.options].some(o=>o.value===k)) sel.value = k;
+        if(d==='asc' || d==='desc') document.getElementById('reorderSortDir'+n).value = d;
+      });
+    }
+  }catch(e){}
+  const st = document.getElementById('reorderSortStatus');
+  if(st) st.textContent = '';
+  reorderState.sortShown = [];
   bar.classList.add('show');
 }
-function applyReorderSort(asc){
+// v32: 第1〜第3順位。値がないセッションは各段で末尾。全段が同値なら並べ替え前の順序を保つ。
+function applyReorderSort(){
+  try{ applyReorderSortInner(); }
+  catch(e){ alert('並べ替えでエラーが発生しました: '+(e && e.message ? e.message : e)); }
+}
+function applyReorderSortInner(){
   if(!reorderState || reorderState.kind!=='sessions') return;
-  const key = reorderState.sortKey || REORDER_SORT_DATE;
-  const byId = new Map(sessions.map(s=>[s.id, s]));
-  const items = reorderState.workIds.map((id, i)=>({id, i, v: byId.get(id) ? reorderSortValue(byId.get(id), key) : null}));
-  items.sort((a,b)=>{
-    const an = a.v===null, bn = b.v===null;
-    if(an || bn) return an===bn ? a.i-b.i : (an ? 1 : -1);
-    if(a.v===b.v) return a.i-b.i;
-    return asc ? a.v-b.v : b.v-a.v;
+  const keys = [];
+  [1,2,3].forEach(n=>{
+    const k = document.getElementById('reorderSortKey'+n).value;
+    const asc = document.getElementById('reorderSortDir'+n).value!=='desc';
+    if(k) keys.push({k, asc, n});
   });
+  if(!keys.length) return;
+  try{
+    localStorage.setItem(REORDER_SORT_STORE, JSON.stringify({
+      keys:[1,2,3].map(n=>document.getElementById('reorderSortKey'+n).value),
+      dirs:[1,2,3].map(n=>document.getElementById('reorderSortDir'+n).value)}));
+  }catch(e){}
+  const byId = new Map(sessions.map(s=>[s.id, s]));
+  const items = reorderState.workIds.map((id, i)=>({id, i,
+    v: keys.map(o=>byId.get(id) ? reorderSortValue(byId.get(id), o.k) : null)}));
+  items.sort((a,b)=>{
+    for(let n=0; n<keys.length; n++){
+      const av = a.v[n], bv = b.v[n];
+      const an = av===null, bn = bv===null;
+      if(an || bn){ if(an!==bn) return an ? 1 : -1; continue; }
+      if(av!==bv) return keys[n].asc ? av-bv : bv-av;
+    }
+    return a.i-b.i;
+  });
+  const before = reorderState.workIds.join('\u0001');
   reorderState.workIds = items.map(x=>x.id);
-  reorderState.sortShown = key;
+  const changed = reorderState.workIds.join('\u0001') !== before;
+  reorderState.sortShown = keys.map(o=>o.k);
+  // v32a: 何が起きたかを画面に出す(値が取れた件数と、並びが変わったか)
+  const sel1 = n=>{const el=document.getElementById('reorderSortKey'+n);return el.options[el.selectedIndex].text;};
+  const total = items.length;
+  const parts = keys.map((o,n)=>{
+    const got = items.filter(x=>x.v[n]!==null).length;
+    return sel1(o.n)+' '+got+'/'+total+'件';
+  });
+  const st = document.getElementById('reorderSortStatus');
+  if(st) st.textContent = (changed ? '並べ替えました' : '並び順は変わりませんでした(すでにその順、または値が同じ)')
+    + ' — 値が取れた件数: '+parts.join(' / ');
   renderReorderList(null);
   const list = document.getElementById('reorderList');
   if(list) list.scrollTop = 0;
@@ -1218,6 +1292,154 @@ function removeReference(sessionId, tab){
 // タブの文脈によって「削除」(実体を消す)か「参照を外す」(この泳者タブからだけ外す)かが変わる。
 // 全セッションタブ、または本人(primarySwimmer)のタブ、未分類タブから消す場合は実削除。
 // 参照先(referencedSwimmers)のタブから消す場合は、参照を外すだけでデータは残す。
+/* ---------- v33: 選択削除(いま開いているタブの中のセッションだけが対象) ----------
+   ・そのタブが本人のセッション → 完全に削除(他のタブで「参照」されている分もそちらから消える)
+   ・そのタブでは「参照」として表示しているだけのセッション → 参照を外すだけ(データは残る)
+   ・「全セッション」タブでは、すべて本人のセッションなので完全に削除する。 */
+var bdState = null; // {ids:Set, tab}
+function bdIsRefOnly(s, tab){
+  return tab!==ALL_TAB && tab!==UNCLASSIFIED_TAB && tab!==s.primarySwimmer && (s.referencedSwimmers||[]).includes(tab);
+}
+function bdLabel(s){
+  const info = getReorderInfo(s);
+  return (info.shootDate||'-')+' '+info.swimmer+(info.swimmerMemo ? ' '+info.swimmerMemo : '');
+}
+function bdEnsureOverlay(){
+  let ov = document.getElementById('bulkDelOverlay');
+  if(ov) return ov;
+  ov = document.createElement('div');
+  ov.id = 'bulkDelOverlay';
+  ov.innerHTML = '<div id="bdHeader"><div id="bdTitle"></div>'
+    + '<div class="btnGroup"><button class="btn small" id="bdCloseBtn">閉じる</button>'
+    + '<button class="btn small warn" id="bdDoBtn" disabled>削除</button></div></div>'
+    + '<div id="bdHint"></div>'
+    + '<div id="bdTools"><div class="nxToolRow">'
+    + '<button class="btn small" id="bdAllBtn">全選択</button>'
+    + '<button class="btn small" id="bdNoneBtn">全解除</button>'
+    + '<span class="nxCount" id="bdCount"></span></div>'
+    + '<div id="bdChips"></div></div>'
+    + '<div id="bdList"></div>';
+  document.body.appendChild(ov);
+  document.getElementById('bdCloseBtn').addEventListener('click', closeBulkDelete);
+  document.getElementById('bdDoBtn').addEventListener('click', bdRun);
+  document.getElementById('bdAllBtn').addEventListener('click', ()=>bdSetAll(true));
+  document.getElementById('bdNoneBtn').addEventListener('click', ()=>bdSetAll(false));
+  document.getElementById('bdChips').addEventListener('click', (e)=>{
+    const c = e.target.closest('.nxChip');
+    if(c) bdToggleGroup(c.getAttribute('data-key'));
+  });
+  document.getElementById('bdList').addEventListener('click', (e)=>{
+    const row = e.target.closest('.nxRow');
+    if(!row || !bdState) return;
+    const id = row.getAttribute('data-id');
+    if(bdState.ids.has(id)) bdState.ids.delete(id); else bdState.ids.add(id);
+    bdUpdate();
+  });
+  return ov;
+}
+function bdList(){ return bdState ? sessionsForTab(bdState.tab) : []; }
+function openBulkDelete(){
+  const list = sessionsForTab(currentTab);
+  if(list.length===0) return;
+  bdState = {ids:new Set(), tab:currentTab};
+  const ov = bdEnsureOverlay();
+  document.getElementById('bdTitle').textContent = '選択削除 — '+tabDisplayName(currentTab)+' ('+list.length+'件)';
+  document.getElementById('bdHint').textContent =
+    '削除するセッションにチェックを入れて、右上の「削除」を押してください(確認が出ます)。削除は元に戻せないので、事前に「バックアップを書き出す」を済ませておくことをお勧めします。'
+    + (currentTab===ALL_TAB ? '' : 'この「'+tabDisplayName(currentTab)+'」タブの中のセッションだけが対象です。「参照」表示のものは、参照を外すだけでデータは残ります。');
+  // 「全セッション」タブのときだけ、泳者ごとにまとめてチェックできるボタンを出す
+  let chips = '';
+  if(currentTab===ALL_TAB){
+    const groups = new Map();
+    list.forEach(s=>{ const k = s.primarySwimmer || UNCLASSIFIED_TAB; if(!groups.has(k)) groups.set(k, []); groups.get(k).push(s); });
+    chips = [...groups.entries()].map(([k, l])=>'<button class="nxChip" data-key="'+escapeHtml(k)+'">'
+      +escapeHtml(k===UNCLASSIFIED_TAB ? '(未分類)' : k)+' ('+l.length+')</button>').join('');
+  }
+  document.getElementById('bdChips').innerHTML = chips;
+  let html = '';
+  list.forEach((s, i)=>{
+    const info = getReorderInfo(s);
+    const ref = bdIsRefOnly(s, currentTab);
+    html += '<div class="reorderRow nxRow" data-id="'+escapeHtml(s.id)+'">'
+      + '<div class="nxCheck"><span class="box">✓</span><span class="num">'+(i+1)+'</span></div>'
+      + '<div class="reorderBody">'
+      + '<div class="rHead"><span class="rSwimmer">'+escapeHtml(info.swimmer)+'</span>'
+      + '<span class="rDate">'+escapeHtml(info.shootDate||'-')+'</span>'
+      + (ref ? '<span class="bdRefTag">参照のみ(外すだけ)</span>' : '')+'</div>'
+      + reorderKvHtml('泳者メモ', info.swimmerMemo, true, false)
+      + reorderKvHtml('水平速度', info.speed, false, true)
+      + reorderKvHtml('メモ', info.memo, true, false)
+      + '</div></div>';
+  });
+  document.getElementById('bdList').innerHTML = html;
+  document.getElementById('bdList').scrollTop = 0;
+  bdUpdate();
+  ov.classList.add('active');
+}
+function closeBulkDelete(){
+  const ov = document.getElementById('bulkDelOverlay');
+  if(ov) ov.classList.remove('active');
+  bdState = null;
+}
+function bdUpdate(){
+  if(!bdState) return;
+  const list = bdList();
+  document.querySelectorAll('#bdList .nxRow').forEach(r=>r.classList.toggle('checked', bdState.ids.has(r.getAttribute('data-id'))));
+  document.getElementById('bdCount').textContent = bdState.ids.size+' / '+list.length+'件を選択';
+  document.querySelectorAll('#bdChips .nxChip').forEach(c=>{
+    const k = c.getAttribute('data-key');
+    const g = list.filter(s=>(s.primarySwimmer || UNCLASSIFIED_TAB)===k);
+    const n = g.filter(s=>bdState.ids.has(s.id)).length;
+    c.classList.toggle('on', n===g.length && n>0);
+    c.classList.toggle('part', n>0 && n<g.length);
+  });
+  const btn = document.getElementById('bdDoBtn');
+  btn.disabled = bdState.ids.size===0;
+  btn.textContent = '削除 ('+bdState.ids.size+'件)';
+}
+function bdSetAll(on){
+  if(!bdState) return;
+  bdState.ids = on ? new Set(bdList().map(s=>s.id)) : new Set();
+  bdUpdate();
+}
+function bdToggleGroup(key){
+  if(!bdState) return;
+  const g = bdList().filter(s=>(s.primarySwimmer || UNCLASSIFIED_TAB)===key);
+  const allOn = g.every(s=>bdState.ids.has(s.id));
+  g.forEach(s=>{ if(allOn) bdState.ids.delete(s.id); else bdState.ids.add(s.id); });
+  bdUpdate();
+}
+async function bdRun(){
+  if(!bdState || bdState.ids.size===0) return;
+  const tab = bdState.tab;
+  const chosen = bdList().filter(s=>bdState.ids.has(s.id));
+  const refs = chosen.filter(s=>bdIsRefOnly(s, tab));
+  const dels = chosen.filter(s=>!bdIsRefOnly(s, tab));
+  const lines = chosen.slice(0, 12).map(s=>'・'+bdLabel(s)+(bdIsRefOnly(s, tab) ? '(参照を外す)' : '')).join('\n')
+    + (chosen.length>12 ? '\n …ほか'+(chosen.length-12)+'件' : '');
+  let msg = '';
+  if(dels.length) msg += dels.length+'件のセッションを完全に削除します。元に戻せません。\n(他のタブで参照されている分も、そちらから消えます)\n';
+  if(refs.length) msg += refs.length+'件は「'+tab+'」タブからの参照を外すだけです(データは残ります)。\n';
+  msg += '\n対象:\n'+lines+'\n\nよろしいですか?';
+  if(!confirm(msg)) return;
+  const btn = document.getElementById('bdDoBtn');
+  btn.disabled = true;
+  try{
+    for(const s of dels){ await dbDelete(s.id); }
+    for(const s of refs){
+      s.referencedSwimmers = (s.referencedSwimmers||[]).filter(n=>n!==tab);
+      await dbPut(s);
+    }
+  }catch(e){
+    alert('削除の途中でエラーが発生しました: '+(e && e.message ? e.message : e)+'\n一覧を読み込み直して確認してください。');
+  }
+  await reloadSessions();
+  if(currentTab!==ALL_TAB && sessionsForTab(currentTab).length===0) currentTab = ALL_TAB;
+  closeBulkDelete();
+  render();
+  alert((dels.length ? dels.length+'件を削除' : '')+(dels.length && refs.length ? '、' : '')+(refs.length ? refs.length+'件の参照を外し' : '')+'ました。');
+}
+
 function deleteOrUnreference(sessionId){
   const s = sessions.find(x=>x.id===sessionId);
   if(!s) return;
@@ -1678,6 +1900,7 @@ function render(){
   renderTable();
   // v22: 並べ替えは2件以上あるタブでだけ意味があるので、それ未満なら押せないようにする。
   document.getElementById('reorderBtn').disabled = sessionsForTab(currentTab).length < 2;
+  document.getElementById('bulkDelBtn').disabled = sessionsForTab(currentTab).length < 1; // v33
   // v24: 泳者タブが2つ以上あるときだけ、タブの並べ替えを押せるようにする。
   document.getElementById('tabReorderBtn').disabled = getSwimmerNames().length < 2;
 }
@@ -1690,7 +1913,7 @@ function render(){
    DAのJSON(daPayload)から画像データ(data:image/...)だけを除いたもの。除いた項目のパスは
    各セッションのremovedImagePathsに記録する。
    選択は「書き出す」を押した時に初めて確定する(全データは範囲を選んだ時点で書き出す)。 */
-const DE_VERSION = 'v31';
+const DE_VERSION = 'v33a';
 var nxState = null;   // {step:'scope'|'swimmers'|'pick', keys:Set(泳者キー), ids:Set(セッションid)}
 
 function nxKeyOf(s){ return s.primarySwimmer || UNCLASSIFIED_TAB; }
@@ -2007,6 +2230,7 @@ document.getElementById('backupImportBox').addEventListener('change', (e)=>{
 document.getElementById('deleteAllBtn').addEventListener('click', deleteAllSessions);
 document.getElementById('numExpBtn').addEventListener('click', openNumExport);
 document.getElementById('reorderBtn').addEventListener('click', ()=>openReorderPanel('sessions'));
+document.getElementById('bulkDelBtn').addEventListener('click', openBulkDelete);
 document.getElementById('tabReorderBtn').addEventListener('click', ()=>openReorderPanel('tabs'));
 
 document.getElementById('tableWrap').addEventListener('click', (e)=>{
