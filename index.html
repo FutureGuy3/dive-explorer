@@ -79,6 +79,31 @@
   }
 
   /* ---------- Table area ---------- */
+  /* v34: 下へスクロールしたとき、どのセッションの指標を見ているか分かるよう、
+     撮影日と泳者メモだけを上部(タブバーの下)に固定表示する。
+     ページ全体がスクロールする構造のため、表の中のsticky行では縦に固定できない。
+     そこで高さ0のsticky枠の中に、列幅・横スクロールを表に同期させた固定バーを重ねる
+     (表示/非表示を切り替えても下の表がずれない)。 */
+  #pinWrap{position:sticky;top:99px;height:0;z-index:18;flex:0 0 auto;}
+  #pinBox{display:none;position:absolute;left:0;right:0;top:0;background:var(--panel);
+    border-bottom:1px solid var(--accent2);box-shadow:0 2px 6px rgba(0,0,0,0.35);overflow:hidden;}
+  #pinLabel{flex:0 0 auto;box-sizing:border-box;padding:4px 6px;font-size:10.5px;color:var(--sub);
+    background:var(--panel);border-right:1px solid var(--line);z-index:2;line-height:1.35;}
+  #pinLabel div+div{margin-top:2px;}
+  #pinScroll{flex:1 1 auto;overflow:hidden;min-width:0;}
+  #pinInner{display:flex;will-change:transform;}
+  .pinCell{flex:0 0 auto;box-sizing:border-box;padding:4px 6px;border-right:1px solid var(--line);
+    font-size:11px;line-height:1.35;overflow:hidden;}
+  .pinCell .pinDate{color:var(--accent2);font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  /* v34b: 指標名を、ブロック(関連する指標のまとまり)ごとに色分けして探しやすくする。
+     隣り合うブロックは必ず別の色になるよう、4色を順番に使う。 */
+  table#compareTable td.mb0:first-child{color:#6ec8ff;}
+  table#compareTable td.mb1:first-child{color:#ffb35c;}
+  table#compareTable td.mb2:first-child{color:#c3a1ff;}
+  table#compareTable td.mb3:first-child{color:#ff8fa3;}
+  .pinCell .pinSwimmer{color:var(--text);font-weight:700;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .pinCell .pinMemo{color:var(--text);margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+    overflow:hidden;overflow-wrap:anywhere;min-height:1.35em;}
   #tableWrap{flex:1;overflow:auto;padding:0 0 24px;}
   table#compareTable{border-collapse:collapse;font-size:11.5px;font-family:var(--mono);}
   table#compareTable th,table#compareTable td{
@@ -345,6 +370,8 @@
     <div>まだセッションが読み込まれていません。</div>
     <div>DIVE ANALYZERで書き出したhtml(DA_..._....html / DAb_..._....html)を、上の「DAのhtml読み込み」から選んでください(複数選択可)。</div>
   </div>
+
+  <div id="pinWrap"><div id="pinBox"><div id="pinLabel"><div>撮影日</div><div>泳者</div><div>泳者メモ</div></div><div id="pinScroll"><div id="pinInner"></div></div></div></div>
 
   <div id="tableWrap"></div>
 </div>
@@ -1770,6 +1797,62 @@ function renderTabs(){
   });
 }
 
+// v34: 撮影日・泳者メモの固定バー(説明はCSSのコメント参照)
+function buildPinBar(parsed){
+  const inner = document.getElementById('pinInner');
+  if(!inner) return;
+  inner.innerHTML = parsed.map(p=>{
+    const d = p.meta.shootDate || '';
+    const m = swimmerMemoDisplayText(p.meta.swimmerMemo) || '';
+    const sw = (p.session && p.session.primarySwimmer) || '';
+    return '<div class="pinCell"><div class="pinDate">'+(d?escapeHtml(d):'—')+'</div>'
+      + '<div class="pinSwimmer" title="'+escapeHtml(sw)+'">'+(sw?escapeHtml(sw):'(未分類)')+'</div>'
+      + '<div class="pinMemo" title="'+escapeHtml(m)+'">'+escapeHtml(m)+'</div></div>';
+  }).join('');
+  updatePinBar();
+}
+function updatePinBar(){
+  const box = document.getElementById('pinBox');
+  if(!box) return;
+  const table = document.getElementById('compareTable');
+  const src = document.getElementById('pinSrcRow');
+  if(!table || !src){ box.style.display = 'none'; return; }
+  const tabs = document.getElementById('tabsBar');
+  const stickyTop = (parseFloat(getComputedStyle(tabs).top)||0) + tabs.offsetHeight;
+  document.getElementById('pinWrap').style.top = stickyTop + 'px';
+  // 元の「泳者メモ」行が、タブバーの裏に隠れたら表示する
+  const show = src.getBoundingClientRect().bottom <= stickyTop + 1;
+  box.style.display = show ? 'flex' : 'none';
+  if(!show) return;
+  const ths = table.querySelectorAll('thead th');
+  const cells = document.querySelectorAll('#pinInner .pinCell');
+  document.getElementById('pinLabel').style.width = ths[0].offsetWidth + 'px';
+  cells.forEach((c, i)=>{ if(ths[i+1]) c.style.width = ths[i+1].offsetWidth + 'px'; });
+  document.getElementById('pinInner').style.transform = 'translateX(' + (-document.getElementById('tableWrap').scrollLeft) + 'px)';
+}
+window.addEventListener('scroll', updatePinBar, {passive:true});
+window.addEventListener('resize', updatePinBar);
+document.getElementById('tableWrap').addEventListener('scroll', updatePinBar, {passive:true});
+
+// v34b: 指標のブロック分け(ユーザー指定の並びのまとまり)。
+// v34c: ここに無いラベル(動画ファイル名、撮影fps/再生fps、基準距離/台高さ、カメラ設定メモ、
+// スタート台までの垂直距離など)は色を付けず、元の色(ライトグレー)のままにする。
+const METRIC_BLOCKS = [
+  ['離台時の水平速度','離台時の落下速度','離台時の飛び出し角度','離台時の前脚伸展角度','離台時合成速度','離台時の重心の高さ','離台時の姿勢角(重心-頭頂)'],
+  ['指先着水時の重心ベクトル角','指先着水時の姿勢角(重心-指先)','指先着水時の姿勢角(重心-頭頂)'],
+  ['頭頂着水時の重心ベクトル角','頭頂着水時の姿勢角(重心-頭頂)'],
+  ['重心入水角度','重心着水時の落下速度','重心入水時合成速度','入水孔直径(指先-つま先)','滞空時間(離台〜指先着水)','滞空時間(離台〜重心着水)','台先端〜重心着水の飛距離','離台時重心-台端距離','運動エネルギー(重心着水時)','運動エネルギー(離台時)'],
+  ['リアクションタイム','ブロックタイム(動き出し〜離台)','バックプレート位置','腕引き動作','重心の前後'],
+  ['重心の高さ(始動前)','重心の高さ(後ろ脛最大傾斜時)','重心の高さ(後ろ脚完全伸展時)','重心の高さ(離台時)'],
+  ['始動前-後ろ脛最大傾斜 平均水平速度','始動前-後ろ脛最大傾斜 平均落下速度','始動前-後ろ脛最大傾斜 平均移動角度','後ろ脛最大傾斜-後ろ脚完全伸展 平均水平速度','後ろ脛最大傾斜-後ろ脚完全伸展 平均落下速度','後ろ脛最大傾斜-後ろ脚完全伸展 平均移動角度','後ろ脚完全伸展-離台時 平均水平速度','後ろ脚完全伸展-離台時 平均落下速度','後ろ脚完全伸展-離台時 平均移動角度'],
+  ['前脚膝角度(始動前)','前脚膝角度(後ろ脛最大傾斜時)','前脚膝角度(後ろ脚完全伸展時)'],
+  ['後ろ脚膝角度(始動前)','後ろ脚膝角度(後ろ脛最大傾斜時)'],
+  ['後ろ脚足首角度(始動前)'],
+  ['後ろ脚脛傾斜(始動前)','後ろ脚脛傾斜(後ろ脛最大傾斜時)'],
+  ['後ろ脚伸展角度(後ろ脚完全伸展時)','前脚脛傾斜(後ろ脚完全伸展時)','前脚伸展角度(離台時)']
+];
+const METRIC_BLOCK_OF = (()=>{ const m = new Map(); METRIC_BLOCKS.forEach((g,i)=>g.forEach(l=>m.set(l,i))); return m; })();
+
 function renderTable(){
   const wrap = document.getElementById('tableWrap');
   const emptyState = document.getElementById('emptyState');
@@ -1778,12 +1861,14 @@ function renderTable(){
   if(sessions.length===0){
     emptyState.style.display = 'flex';
     wrap.innerHTML = '';
+    buildPinBar([]);
     return;
   }
   emptyState.style.display = 'none';
 
   if(list.length===0){
     wrap.innerHTML = '<div style="padding:24px;color:var(--sub);font-size:13px;">このタブに表示できるセッションがありません。</div>';
+    buildPinBar([]);
     return;
   }
 
@@ -1825,7 +1910,7 @@ function renderTable(){
   // 撮影日・泳者メモ・体重(DA側の先頭行から)
   html += '<tr class="sectionRow"><td>撮影情報</td>' + list.map(()=>'<td></td>').join('') + '</tr>';
   ['撮影日','泳者メモ','体重(kg)'].forEach((label, li)=>{
-    html += '<tr><td>'+label+'</td>';
+    html += '<tr'+(li===1?' id="pinSrcRow"':'')+'><td>'+label+'</td>';
     parsed.forEach(p=>{
       const v = li===0 ? p.meta.shootDate : li===1 ? swimmerMemoDisplayText(p.meta.swimmerMemo) : p.meta.mass;
       html += '<td>'+escapeHtml(v)+'</td>';
@@ -1865,7 +1950,7 @@ function renderTable(){
     }
     const info = findMetricInfoForLabel(list, label);
     const infoIconHtml = info ? ' <span class="infoIcon" data-label="'+escapeHtml(label)+'">ⓘ</span>' : '';
-    html += '<tr><td>'+escapeHtml(label)+infoIconHtml+'</td>';
+    html += '<tr><td'+(METRIC_BLOCK_OF.has(label) ? ' class="mb'+(METRIC_BLOCK_OF.get(label)%4)+'"' : '')+'>'+escapeHtml(label)+infoIconHtml+'</td>';
     rowMaps.forEach(m=>{
       let cellHtml = '-';
       if(m.has(label)){
@@ -1893,6 +1978,7 @@ function renderTable(){
   // v15: 既に入力済みのメモがある場合、最初から内容に応じた高さで表示する
   // (クリックして初めて正しい高さになる、という状態を避ける)。
   wrap.querySelectorAll('textarea.memoBox').forEach(autoGrowMemoBox);
+  buildPinBar(parsed); // v34
 }
 
 function render(){
@@ -1913,7 +1999,7 @@ function render(){
    DAのJSON(daPayload)から画像データ(data:image/...)だけを除いたもの。除いた項目のパスは
    各セッションのremovedImagePathsに記録する。
    選択は「書き出す」を押した時に初めて確定する(全データは範囲を選んだ時点で書き出す)。 */
-const DE_VERSION = 'v33a';
+const DE_VERSION = 'v34c';
 var nxState = null;   // {step:'scope'|'swimmers'|'pick', keys:Set(泳者キー), ids:Set(セッションid)}
 
 function nxKeyOf(s){ return s.primarySwimmer || UNCLASSIFIED_TAB; }
