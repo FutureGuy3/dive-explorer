@@ -213,7 +213,12 @@
   }
   #reorderTitle{font-size:14px;color:var(--accent2);font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   #reorderHeader .btnGroup{display:flex;gap:6px;flex:0 0 auto;}
-  #reorderHint{font-size:11px;color:var(--sub);padding:6px 14px;background:var(--panel);border-bottom:1px solid var(--line);flex:0 0 auto;}
+  #reorderHint{font-size:11px;color:var(--sub);padding:6px 14px;background:var(--panel);border-bottom:1px solid var(--line);flex:0 0 auto;
+    display:flex;align-items:center;gap:10px;}
+  #reorderHintText{flex:1 1 auto;min-width:0;}
+  /* v34d: 「並べ替える」ボタンは、第1順位の昇順/降順の選択欄のすぐ上(説明文の右側)に置く。 */
+  #reorderSortRun{flex:0 0 auto;display:none;padding:8px 14px;font-size:13px;}
+  #reorderSortRun.show{display:block;}
   /* v31: 指標による並べ替え(基準の選択+昇順/降順)。 */
   #reorderSortBar{
     display:none;flex-direction:column;gap:5px;padding:6px 14px;
@@ -965,13 +970,12 @@ function openReorderPanel(kind){
     overlay.innerHTML = '<div id="reorderHeader"><div id="reorderTitle"></div>'
       + '<div class="btnGroup"><button class="btn small" id="reorderCancelBtn">キャンセル</button>'
       + '<button class="btn primary" id="reorderDoneBtn">完了</button></div></div>'
-      + '<div id="reorderHint"></div>'
+      + '<div id="reorderHint"><span id="reorderHintText"></span><button class="btn small primary" id="reorderSortRun">並べ替える</button></div>'
       + '<div id="reorderSortBar">'
       + [1,2,3].map(n=>'<div class="rsRow"><span class="rsLbl">第'+n+'</span>'
           + '<select class="rsKey" id="reorderSortKey'+n+'"></select>'
           + '<select class="rsDir" id="reorderSortDir'+n+'"><option value="asc">昇順</option><option value="desc">降順</option></select></div>').join('')
-      + '<div class="rsRow"><button class="btn small primary" id="reorderSortRun">並べ替える</button>'
-      + '<span>基準と向きを選んで押すと、一覧が並び替わります(確定は「完了」)</span></div>'
+      + '<div class="rsRow"><span>基準と向きを選んで、上の「並べ替える」を押すと、一覧が並び替わります(確定は「完了」)</span></div>'
       + '<div id="reorderSortStatus" style="font-size:11px;color:var(--accent2);min-height:14px;"></div></div>'
       + '<div id="reorderList"></div>';
     document.body.appendChild(overlay);
@@ -989,7 +993,7 @@ function openReorderPanel(kind){
     });
   }
   document.getElementById('reorderTitle').textContent = title;
-  document.getElementById('reorderHint').textContent = hint;
+  document.getElementById('reorderHintText').textContent = hint;
   setupReorderSortBar();
   document.getElementById('reorderList').scrollTop = 0;
   renderReorderList(null);
@@ -1030,6 +1034,8 @@ function reorderSortRawValue(s, key){
 function setupReorderSortBar(){
   const bar = document.getElementById('reorderSortBar');
   if(!bar) return;
+  const runBtn = document.getElementById('reorderSortRun');
+  if(runBtn) runBtn.classList.toggle('show', !!(reorderState && reorderState.kind==='sessions'));
   if(!reorderState || reorderState.kind!=='sessions'){ bar.classList.remove('show'); return; }
   const list = reorderState.baseIds.map(id=>sessions.find(s=>s.id===id)).filter(Boolean);
   const labels = [];
@@ -1999,7 +2005,7 @@ function render(){
    DAのJSON(daPayload)から画像データ(data:image/...)だけを除いたもの。除いた項目のパスは
    各セッションのremovedImagePathsに記録する。
    選択は「書き出す」を押した時に初めて確定する(全データは範囲を選んだ時点で書き出す)。 */
-const DE_VERSION = 'v34c';
+const DE_VERSION = 'v34d';
 var nxState = null;   // {step:'scope'|'swimmers'|'pick', keys:Set(泳者キー), ids:Set(セッションid)}
 
 function nxKeyOf(s){ return s.primarySwimmer || UNCLASSIFIED_TAB; }
